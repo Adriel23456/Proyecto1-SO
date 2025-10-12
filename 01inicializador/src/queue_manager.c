@@ -1,264 +1,178 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "queue_manager.h"
 #include "constants.h"
 #include "structures.h"
 
-// Inicializar las colas en memoria compartida
+/*
+ * Acceso al array físico de cada cola mediante su offset en la SHM.
+ * Esto evita el uso de punteros no válidos entre procesos.
+ */
+static inline SlotRef* enc_array(SharedMemory* shm) {
+    return (SlotRef*)((char*)shm + shm->encrypt_queue.array_offset);
+}
+static inline SlotRef* dec_array(SharedMemory* shm) {
+    return (SlotRef*)((char*)shm + shm->decrypt_queue.array_offset);
+}
+
+/*
+ * Inicialización de colas:
+ *  - encrypt: se llena con todos los índices [0..buffer_size-1].
+ *  - decrypt: queda vacía.
+ */
 void initialize_queues(SharedMemory* shm, int buffer_size) {
-    // Inicializar la cola de encriptación
     initialize_encrypt_queue(shm, buffer_size);
-    
-    // Inicializar la cola de desencriptación
     initialize_decrypt_queue(shm);
-    
+
     printf("  • Estado de las colas:\n");
     printf("    - QueueEncript: %d posiciones disponibles\n", shm->encrypt_queue.size);
     printf("    - QueueDeencript: %d elementos (vacía)\n", shm->decrypt_queue.size);
 }
 
-// Inicializar la cola de encriptación con todas las posiciones disponibles
 void initialize_encrypt_queue(SharedMemory* shm, int buffer_size) {
-    Queue* queue = &shm->encrypt_queue;
-    
-    // Inicializar la estructura de la cola
-    queue->front = NULL;
-    queue->rear = NULL;
-    queue->size = 0;
-    queue->max_size = buffer_size;
-    
-    // Para este ejemplo, vamos a usar un pool de nodos estáticos
-    // En lugar de malloc (que no funciona bien en memoria compartida),
-    // reservamos espacio después de SharedMemory para los nodos
-    
-    // Obtener puntero al área de nodos (después del buffer y archivo)
-    size_t nodes_offset = shm->file_data_offset + shm->file_data_size;
-    QueueNode* nodes_pool = (QueueNode*)((char*)shm + nodes_offset);
-    
-    // Llenar la cola con todas las posiciones disponibles
+    Queue* q = &shm->encrypt_queue;
+    q->head = 0;
+    q->tail = 0;
+    q->size = 0;
+    q->capacity = buffer_size;
+
+    SlotRef* arr = enc_array(shm);
     for (int i = 0; i < buffer_size; i++) {
-        QueueNode* new_node = &nodes_pool[i];
-        new_node->slot_index = i;  // Índice del slot (0-based)
-        new_node->text_index = -1;  // No usado en cola de encriptación
-        new_node->next = NULL;
-        
-        if (queue->front == NULL) {
-            queue->front = new_node;
-            queue->rear = new_node;
-        } else {
-            queue->rear->next = new_node;
-            queue->rear = new_node;
-        }
-        queue->size++;
+        arr[q->tail].slot_index = i;
+        arr[q->tail].text_index = -1;
+        q->tail = (q->tail + 1) % q->capacity;
     }
-    
-    // Mostrar algunas posiciones iniciales
+    q->size = buffer_size;
+
     printf("  • Cola de encriptación inicializada:\n");
-    QueueNode* current = queue->front;
     printf("    Slots disponibles: ");
-    for (int i = 0; i < MIN(5, buffer_size); i++) {
-        if (current != NULL) {
-            printf("%d ", current->slot_index);
-            current = current->next;
-        }
+    int preview = (buffer_size < 5) ? buffer_size : 5;
+    int pos = q->head;
+    for (int i = 0; i < preview; i++) {
+        printf("%d ", arr[pos].slot_index);
+        pos = (pos + 1) % q->capacity;
     }
-    if (buffer_size > 5) {
-        printf("... (%d total)", buffer_size);
-    }
+    if (buffer_size > 5) printf("... (%d total)", buffer_size);
     printf("\n");
 }
 
-// Inicializar la cola de desencriptación (vacía)
 void initialize_decrypt_queue(SharedMemory* shm) {
-    Queue* queue = &shm->decrypt_queue;
-    
-    queue->front = NULL;
-    queue->rear = NULL;
-    queue->size = 0;
-    queue->max_size = shm->buffer_size;
-    
+    Queue* q = &shm->decrypt_queue;
+    q->head = 0;
+    q->tail = 0;
+    q->size = 0;
+    // capacity se configuró en create_shared_memory
     printf("  • Cola de desencriptación inicializada (vacía)\n");
 }
 
-// Enqueue para la cola de encriptación (agregar slot disponible)
+/*
+ * Enqueue de slot libre en encrypt.
+ */
 int enqueue_encrypt_slot(SharedMemory* shm, int slot_index) {
-    Queue* queue = &shm->encrypt_queue;
-    
-    if (queue->size >= queue->max_size) {
-        return ERROR;  // Cola llena
-    }
-    
-    // Obtener un nodo del pool
-    size_t nodes_offset = shm->file_data_offset + shm->file_data_size;
-    QueueNode* nodes_pool = (QueueNode*)((char*)shm + nodes_offset);
-    
-    // Buscar un nodo libre (usamos el índice del buffer_size para los nodos de decrypt)
-    int node_index = shm->buffer_size + queue->size;
-    QueueNode* new_node = &nodes_pool[node_index];
-    
-    new_node->slot_index = slot_index;
-    new_node->text_index = -1;
-    new_node->next = NULL;
-    
-    if (queue->rear == NULL) {
-        queue->front = new_node;
-        queue->rear = new_node;
-    } else {
-        queue->rear->next = new_node;
-        queue->rear = new_node;
-    }
-    
-    queue->size++;
+    Queue* q = &shm->encrypt_queue;
+    if (q->size >= q->capacity) return ERROR;
+    SlotRef* arr = enc_array(shm);
+    arr[q->tail].slot_index = slot_index;
+    arr[q->tail].text_index = -1;
+    q->tail = (q->tail + 1) % q->capacity;
+    q->size++;
     return SUCCESS;
 }
 
-// Dequeue para la cola de encriptación (obtener slot disponible)
+/*
+ * Dequeue de slot libre en encrypt.
+ */
 int dequeue_encrypt_slot(SharedMemory* shm) {
-    Queue* queue = &shm->encrypt_queue;
-    
-    if (queue->front == NULL) {
-        return -1;  // Cola vacía
-    }
-    
-    QueueNode* node_to_remove = queue->front;
-    int slot_index = node_to_remove->slot_index;
-    
-    queue->front = node_to_remove->next;
-    if (queue->front == NULL) {
-        queue->rear = NULL;
-    }
-    
-    queue->size--;
-    
-    // No liberamos memoria porque está en el pool
-    node_to_remove->next = NULL;
-    
+    Queue* q = &shm->encrypt_queue;
+    if (q->size == 0) return -1;
+    SlotRef* arr = enc_array(shm);
+    int slot_index = arr[q->head].slot_index;
+    q->head = (q->head + 1) % q->capacity;
+    q->size--;
     return slot_index;
 }
 
-// Enqueue para la cola de desencriptación (agregar elemento con datos)
+/*
+ * Enqueue de elemento con datos en decrypt.
+ */
 int enqueue_decrypt_slot(SharedMemory* shm, int slot_index, int text_index) {
-    Queue* queue = &shm->decrypt_queue;
-    
-    if (queue->size >= queue->max_size) {
-        return ERROR;  // Cola llena
-    }
-    
-    // Obtener un nodo del pool (usamos la segunda mitad para decrypt)
-    size_t nodes_offset = shm->file_data_offset + shm->file_data_size;
-    QueueNode* nodes_pool = (QueueNode*)((char*)shm + nodes_offset);
-    
-    // Los nodos para decrypt empiezan después de los de encrypt
-    int node_index = shm->buffer_size * 2 + queue->size;
-    QueueNode* new_node = &nodes_pool[node_index];
-    
-    new_node->slot_index = slot_index;
-    new_node->text_index = text_index;
-    new_node->next = NULL;
-    
-    if (queue->rear == NULL) {
-        queue->front = new_node;
-        queue->rear = new_node;
-    } else {
-        queue->rear->next = new_node;
-        queue->rear = new_node;
-    }
-    
-    queue->size++;
+    Queue* q = &shm->decrypt_queue;
+    if (q->size >= q->capacity) return ERROR;
+    SlotRef* arr = dec_array(shm);
+    arr[q->tail].slot_index = slot_index;
+    arr[q->tail].text_index = text_index;
+    q->tail = (q->tail + 1) % q->capacity;
+    q->size++;
     return SUCCESS;
 }
 
-// Dequeue para la cola de desencriptación (obtener elemento con datos)
+/*
+ * Dequeue FIFO en decrypt.
+ */
 SlotInfo dequeue_decrypt_slot(SharedMemory* shm) {
-    Queue* queue = &shm->decrypt_queue;
-    SlotInfo info = {-1, -1};
-    
-    if (queue->front == NULL) {
-        return info;  // Cola vacía
-    }
-    
-    QueueNode* node_to_remove = queue->front;
-    info.slot_index = node_to_remove->slot_index;
-    info.text_index = node_to_remove->text_index;
-    
-    queue->front = node_to_remove->next;
-    if (queue->front == NULL) {
-        queue->rear = NULL;
-    }
-    
-    queue->size--;
-    
-    // No liberamos memoria porque está en el pool
-    node_to_remove->next = NULL;
-    
+    SlotInfo info = { .slot_index = -1, .text_index = -1 };
+    Queue* q = &shm->decrypt_queue;
+    if (q->size == 0) return info;
+    SlotRef* arr = dec_array(shm);
+    info.slot_index = arr[q->head].slot_index;
+    info.text_index = arr[q->head].text_index;
+    q->head = (q->head + 1) % q->capacity;
+    q->size--;
     return info;
 }
 
-// Dequeue ordenado para mantener secuencialidad (para receptores)
+/*
+ * Dequeue ordenado por menor text_index en decrypt.
+ * Complejidad O(n) sobre el tamaño actual de la cola.
+ */
 SlotInfo dequeue_decrypt_slot_ordered(SharedMemory* shm) {
-    Queue* queue = &shm->decrypt_queue;
-    SlotInfo info = {-1, -1};
-    
-    if (queue->front == NULL) {
-        return info;  // Cola vacía
-    }
-    
-    // Buscar el nodo con el text_index más bajo
-    QueueNode* current = queue->front;
-    QueueNode* prev = NULL;
-    QueueNode* min_prev = NULL;
-    QueueNode* min_node = queue->front;
-    int min_text_index = min_node->text_index;
-    
-    // Recorrer la cola buscando el mínimo
-    while (current != NULL) {
-        if (current->text_index < min_text_index) {
-            min_text_index = current->text_index;
-            min_node = current;
-            min_prev = prev;
+    SlotInfo info = { .slot_index = -1, .text_index = -1 };
+    Queue* q = &shm->decrypt_queue;
+    if (q->size == 0) return info;
+
+    SlotRef* arr = dec_array(shm);
+    int best_pos = -1;
+    int best_text = INT_MAX;
+
+    // Búsqueda lineal del text_index mínimo en la cola circular
+    for (int i = 0, pos = q->head; i < q->size; i++, pos = (pos + 1) % q->capacity) {
+        if (arr[pos].text_index < best_text) {
+            best_text = arr[pos].text_index;
+            best_pos = pos;
         }
-        prev = current;
-        current = current->next;
     }
-    
-    // Extraer el nodo con menor text_index
-    info.slot_index = min_node->slot_index;
-    info.text_index = min_node->text_index;
-    
-    // Remover el nodo de la cola
-    if (min_prev == NULL) {
-        // El mínimo es el primero
-        queue->front = min_node->next;
-    } else {
-        min_prev->next = min_node->next;
+    if (best_pos == -1) return info;
+
+    // Rotación hasta llevar el mejor elemento a head
+    while (q->head != best_pos) {
+        SlotRef tmp = arr[q->head];
+        q->head = (q->head + 1) % q->capacity;
+        arr[q->tail] = tmp;
+        q->tail = (q->tail + 1) % q->capacity;
+        // q->size no cambia
     }
-    
-    if (min_node == queue->rear) {
-        queue->rear = min_prev;
-    }
-    
-    queue->size--;
-    min_node->next = NULL;
-    
+
+    // Pop del elemento óptimo
+    info.slot_index = arr[q->head].slot_index;
+    info.text_index = arr[q->head].text_index;
+    q->head = (q->head + 1) % q->capacity;
+    q->size--;
     return info;
 }
 
-// Obtener el estado actual de las colas
 void print_queue_status(SharedMemory* shm) {
     printf("Estado de las colas:\n");
-    printf("  • QueueEncript: %d/%d slots disponibles\n", 
-           shm->encrypt_queue.size, shm->encrypt_queue.max_size);
-    printf("  • QueueDeencript: %d/%d elementos con datos\n", 
-           shm->decrypt_queue.size, shm->decrypt_queue.max_size);
+    printf("  • QueueEncript: %d/%d slots disponibles\n",
+           shm->encrypt_queue.size, shm->encrypt_queue.capacity);
+    printf("  • QueueDeencript: %d/%d elementos con datos\n",
+           shm->decrypt_queue.size, shm->decrypt_queue.capacity);
 }
 
-// Verificar si la cola de encriptación está vacía
 int is_encrypt_queue_empty(SharedMemory* shm) {
     return shm->encrypt_queue.size == 0;
 }
 
-// Verificar si la cola de desencriptación está vacía
 int is_decrypt_queue_empty(SharedMemory* shm) {
     return shm->decrypt_queue.size == 0;
 }

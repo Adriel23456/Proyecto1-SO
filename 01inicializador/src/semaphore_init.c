@@ -1,230 +1,145 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/sem.h>
-#include <errno.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <semaphore.h>
+#include <unistd.h>
 #include "semaphore_init.h"
 #include "constants.h"
 
-// Unión para operaciones de semáforos (requerida por System V)
-union semun {
-    int val;                    // Valor para SETVAL
-    struct semid_ds *buf;       // Buffer para IPC_STAT, IPC_SET
-    unsigned short *array;      // Array para GETALL, SETALL
-    struct seminfo *__buf;      // Buffer para IPC_INFO (Linux)
-};
+/* Apertura (creación) segura: si existen, se des-referencian y recrean. */
+static int create_named_semaphore(const char* name, unsigned int initial_value, sem_t** out) {
+    // Cerramos residuos previos si los hubiera
+    sem_unlink(name);
 
-// Inicializar todos los semáforos del sistema
+    sem_t* h = sem_open(name, O_CREAT | O_EXCL, IPC_PERMS, initial_value);
+    if (h == SEM_FAILED) {
+        fprintf(stderr, RED "[ERROR] sem_open('%s') falló: %s\n" RESET, name, strerror(errno));
+        return ERROR;
+    }
+    if (out) *out = h;
+    return SUCCESS;
+}
+
+/* Cierre de handle (no elimina el nombre). */
+static void close_handle(sem_t* h) {
+    if (h && h != SEM_FAILED) sem_close(h);
+}
+
+/* Creación e inicialización de todos los semáforos requeridos. */
 int initialize_semaphores(int buffer_size) {
-    key_t key = SEM_BASE_KEY;
-    
-    // Intentar eliminar semáforos previos si existen
-    int old_semid = semget(key, 0, 0);
-    if (old_semid != -1) {
-        printf(YELLOW "  ! Semáforos existentes detectados, eliminando...\n" RESET);
-        if (semctl(old_semid, 0, IPC_RMID) == -1) {
-            fprintf(stderr, RED "  [WARNING] No se pudieron eliminar semáforos previos\n" RESET);
-        }
-    }
-    
-    // Crear el conjunto de semáforos
-    int sem_id = semget(key, NUM_SEMAPHORES, IPC_CREAT | IPC_EXCL | IPC_PERMS);
-    if (sem_id == -1) {
-        fprintf(stderr, RED "[ERROR] semget falló: %s\n" RESET, strerror(errno));
-        return ERROR;
-    }
-    
-    printf("  • Conjunto de semáforos creado con ID: %d\n", sem_id);
-    printf("  • Key: 0x%04X\n", key);
-    printf("  • Número de semáforos: %d\n", NUM_SEMAPHORES);
-    
-    // Inicializar cada semáforo con su valor inicial
-    union semun arg;
-    
-    // sem_global_mutex: mutex para acceso global (inicializado a 1)
-    arg.val = 1;
-    if (semctl(sem_id, SEM_GLOBAL_MUTEX, SETVAL, arg) == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudo inicializar sem_global_mutex: %s\n" RESET, 
-                strerror(errno));
-        semctl(sem_id, 0, IPC_RMID);
-        return ERROR;
-    }
-    
-    // sem_encrypt_queue: mutex para cola de encriptación (inicializado a 1)
-    arg.val = 1;
-    if (semctl(sem_id, SEM_ENCRYPT_QUEUE, SETVAL, arg) == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudo inicializar sem_encrypt_queue: %s\n" RESET, 
-                strerror(errno));
-        semctl(sem_id, 0, IPC_RMID);
-        return ERROR;
-    }
-    
-    // sem_decrypt_queue: mutex para cola de desencriptación (inicializado a 1)
-    arg.val = 1;
-    if (semctl(sem_id, SEM_DECRYPT_QUEUE, SETVAL, arg) == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudo inicializar sem_decrypt_queue: %s\n" RESET, 
-                strerror(errno));
-        semctl(sem_id, 0, IPC_RMID);
-        return ERROR;
-    }
-    
-    // sem_encrypt_spaces: contador de espacios disponibles (inicializado a buffer_size)
-    arg.val = buffer_size;
-    if (semctl(sem_id, SEM_ENCRYPT_SPACES, SETVAL, arg) == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudo inicializar sem_encrypt_spaces: %s\n" RESET, 
-                strerror(errno));
-        semctl(sem_id, 0, IPC_RMID);
-        return ERROR;
-    }
-    
-    // sem_decrypt_items: contador de items disponibles (inicializado a 0)
-    arg.val = 0;
-    if (semctl(sem_id, SEM_DECRYPT_ITEMS, SETVAL, arg) == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudo inicializar sem_decrypt_items: %s\n" RESET, 
-                strerror(errno));
-        semctl(sem_id, 0, IPC_RMID);
-        return ERROR;
-    }
-    
-    // Verificar valores iniciales
-    print_semaphore_values(sem_id, buffer_size);
-    
-    return sem_id;
-}
+    sem_t *g = NULL, *eq = NULL, *dq = NULL, *es = NULL, *di = NULL;
 
-// Obtener el ID del conjunto de semáforos existente
-int get_semaphore_set() {
-    key_t key = SEM_BASE_KEY;
-    
-    // Obtener el conjunto existente (no crear nuevo)
-    int sem_id = semget(key, NUM_SEMAPHORES, 0);
-    if (sem_id == -1) {
-        fprintf(stderr, RED "[ERROR] No se encontraron semáforos con key 0x%04X: %s\n" RESET, 
-                key, strerror(errno));
-        return ERROR;
-    }
-    
-    return sem_id;
-}
+    printf("  • Creando semáforos POSIX nombrados:\n");
 
-// Operación wait (P) en un semáforo
-int sem_wait_custom(int sem_id, int sem_num) {
-    struct sembuf operation;
-    
-    operation.sem_num = sem_num;  // Número del semáforo
-    operation.sem_op = -1;         // Decrementar
-    operation.sem_flg = 0;         // Bloquear si es necesario
-    
-    if (semop(sem_id, &operation, 1) == -1) {
-        if (errno != EINTR) {  // Ignorar interrupciones por señales
-            fprintf(stderr, RED "[ERROR] sem_wait en semáforo %d: %s\n" RESET, 
-                    sem_num, strerror(errno));
-        }
+    if (create_named_semaphore(SEM_NAME_GLOBAL_MUTEX,   1, &g)  != SUCCESS) return ERROR;
+    if (create_named_semaphore(SEM_NAME_ENCRYPT_QUEUE,  1, &eq) != SUCCESS) { close_handle(g); return ERROR; }
+    if (create_named_semaphore(SEM_NAME_DECRYPT_QUEUE,  1, &dq) != SUCCESS) { close_handle(g); close_handle(eq); return ERROR; }
+    if (create_named_semaphore(SEM_NAME_ENCRYPT_SPACES, (unsigned int)buffer_size, &es) != SUCCESS) {
+        close_handle(g); close_handle(eq); close_handle(dq); return ERROR;
+    }
+    if (create_named_semaphore(SEM_NAME_DECRYPT_ITEMS,  0, &di) != SUCCESS) {
+        close_handle(g); close_handle(eq); close_handle(dq); close_handle(es);
         return ERROR;
     }
-    
+
+    // Imprimir nombres creados
+    printf("    - %s\n", SEM_NAME_GLOBAL_MUTEX);
+    printf("    - %s\n", SEM_NAME_ENCRYPT_QUEUE);
+    printf("    - %s\n", SEM_NAME_DECRYPT_QUEUE);
+    printf("    - %s (valor inicial: %d)\n", SEM_NAME_ENCRYPT_SPACES, buffer_size);
+    printf("    - %s (valor inicial: 0)\n",   SEM_NAME_DECRYPT_ITEMS);
+
+    // Mostrar valores de arranque
+    print_semaphore_values();
+
+    // Cerramos los handles locales (otros procesos los abrirán por nombre)
+    close_handle(g); close_handle(eq); close_handle(dq); close_handle(es); close_handle(di);
     return SUCCESS;
 }
 
-// Operación post (V) en un semáforo
-int sem_post_custom(int sem_id, int sem_num) {
-    struct sembuf operation;
-    
-    operation.sem_num = sem_num;  // Número del semáforo
-    operation.sem_op = 1;          // Incrementar
-    operation.sem_flg = 0;         // No bloquear
-    
-    if (semop(sem_id, &operation, 1) == -1) {
-        fprintf(stderr, RED "[ERROR] sem_post en semáforo %d: %s\n" RESET, 
-                sem_num, strerror(errno));
+/* Elimina los semáforos nombrados del sistema. */
+int cleanup_semaphores(void) {
+    int ok = SUCCESS;
+    if (sem_unlink(SEM_NAME_GLOBAL_MUTEX)   == -1 && errno != ENOENT) ok = ERROR;
+    if (sem_unlink(SEM_NAME_ENCRYPT_QUEUE)  == -1 && errno != ENOENT) ok = ERROR;
+    if (sem_unlink(SEM_NAME_DECRYPT_QUEUE)  == -1 && errno != ENOENT) ok = ERROR;
+    if (sem_unlink(SEM_NAME_ENCRYPT_SPACES) == -1 && errno != ENOENT) ok = ERROR;
+    if (sem_unlink(SEM_NAME_DECRYPT_ITEMS)  == -1 && errno != ENOENT) ok = ERROR;
+
+    if (ok == SUCCESS) {
+        printf(GREEN "  ✓ Semáforos POSIX eliminados correctamente\n" RESET);
+    } else {
+        fprintf(stderr, RED "  [ERROR] No se pudieron eliminar uno o más semáforos POSIX\n" RESET);
+    }
+    return ok;
+}
+
+/* Obtiene (temporalmente) el valor de un semáforo por nombre para imprimir. */
+static int get_value_of(const char* name, int* out) {
+    sem_t* h = sem_open(name, 0);
+    if (h == SEM_FAILED) return ERROR;
+    int v = 0;
+    if (sem_getvalue(h, &v) == -1) {
+        sem_close(h);
         return ERROR;
     }
-    
+    sem_close(h);
+    if (out) *out = v;
     return SUCCESS;
 }
 
-// Operación trywait en un semáforo (no bloqueante)
-int sem_trywait_custom(int sem_id, int sem_num) {
-    struct sembuf operation;
-    
-    operation.sem_num = sem_num;  // Número del semáforo
-    operation.sem_op = -1;         // Decrementar
-    operation.sem_flg = IPC_NOWAIT; // No bloquear
-    
-    if (semop(sem_id, &operation, 1) == -1) {
-        if (errno == EAGAIN) {
-            return ERROR;  // Semáforo no disponible
-        }
-        fprintf(stderr, RED "[ERROR] sem_trywait en semáforo %d: %s\n" RESET, 
-                sem_num, strerror(errno));
-        return ERROR;
-    }
-    
-    return SUCCESS;
+/* Imprime los valores actuales de los semáforos POSIX nombrados. */
+void print_semaphore_values(void) {
+    int v;
+
+    printf("\n  • Valores actuales de semáforos POSIX:\n");
+
+    if (get_value_of(SEM_NAME_GLOBAL_MUTEX, &v) == SUCCESS)
+        printf("    %s: %d (mutex global)\n", SEM_NAME_GLOBAL_MUTEX, v);
+    else
+        printf("    %s: <no disponible>\n", SEM_NAME_GLOBAL_MUTEX);
+
+    if (get_value_of(SEM_NAME_ENCRYPT_QUEUE, &v) == SUCCESS)
+        printf("    %s: %d (mutex cola encriptación)\n", SEM_NAME_ENCRYPT_QUEUE, v);
+    else
+        printf("    %s: <no disponible>\n", SEM_NAME_ENCRYPT_QUEUE);
+
+    if (get_value_of(SEM_NAME_DECRYPT_QUEUE, &v) == SUCCESS)
+        printf("    %s: %d (mutex cola desencriptación)\n", SEM_NAME_DECRYPT_QUEUE, v);
+    else
+        printf("    %s: <no disponible>\n", SEM_NAME_DECRYPT_QUEUE);
+
+    if (get_value_of(SEM_NAME_ENCRYPT_SPACES, &v) == SUCCESS)
+        printf("    %s: %d (espacios disponibles)\n", SEM_NAME_ENCRYPT_SPACES, v);
+    else
+        printf("    %s: <no disponible>\n", SEM_NAME_ENCRYPT_SPACES);
+
+    if (get_value_of(SEM_NAME_DECRYPT_ITEMS, &v) == SUCCESS)
+        printf("    %s: %d (items para leer)\n", SEM_NAME_DECRYPT_ITEMS, v);
+    else
+        printf("    %s: <no disponible>\n", SEM_NAME_DECRYPT_ITEMS);
+
+    printf("\n");
 }
 
-// Obtener el valor actual de un semáforo
-int get_semaphore_value(int sem_id, int sem_num) {
-    int value = semctl(sem_id, sem_num, GETVAL);
-    if (value == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudo obtener valor del semáforo %d: %s\n" RESET, 
-                sem_num, strerror(errno));
-        return -1;
-    }
-    return value;
-}
+/*
+ * Desbloqueo masivo útil durante el apagado ordenado:
+ *  - Publica 'buffer_size' veces en ENCRYPT_SPACES e igualmente en DECRYPT_ITEMS.
+ *  - Con esto se evita que queden procesos bloqueados al momento de finalizar.
+ */
+void wake_all_blocked_processes(int buffer_size) {
+    sem_t *es = sem_open(SEM_NAME_ENCRYPT_SPACES, 0);
+    sem_t *di = sem_open(SEM_NAME_DECRYPT_ITEMS, 0);
 
-// Imprimir los valores actuales de todos los semáforos
-void print_semaphore_values(int sem_id, int buffer_size) {
-    printf("\n  • Valores iniciales de los semáforos:\n");
-    
-    int val = get_semaphore_value(sem_id, SEM_GLOBAL_MUTEX);
-    printf("    [%d] sem_global_mutex: %d (mutex global)\n", SEM_GLOBAL_MUTEX, val);
-    
-    val = get_semaphore_value(sem_id, SEM_ENCRYPT_QUEUE);
-    printf("    [%d] sem_encrypt_queue: %d (mutex cola encriptación)\n", SEM_ENCRYPT_QUEUE, val);
-    
-    val = get_semaphore_value(sem_id, SEM_DECRYPT_QUEUE);
-    printf("    [%d] sem_decrypt_queue: %d (mutex cola desencriptación)\n", SEM_DECRYPT_QUEUE, val);
-    
-    val = get_semaphore_value(sem_id, SEM_ENCRYPT_SPACES);
-    printf("    [%d] sem_encrypt_spaces: %d/%d (espacios disponibles)\n", 
-           SEM_ENCRYPT_SPACES, val, buffer_size);
-    
-    val = get_semaphore_value(sem_id, SEM_DECRYPT_ITEMS);
-    printf("    [%d] sem_decrypt_items: %d (items para leer)\n", SEM_DECRYPT_ITEMS, val);
-}
-
-// Limpiar todos los semáforos (solo el finalizador debe hacer esto)
-int cleanup_semaphores() {
-    int sem_id = get_semaphore_set();
-    if (sem_id == ERROR) {
-        return ERROR;
+    if (es != SEM_FAILED) {
+        for (int i = 0; i < buffer_size; i++) sem_post(es);
+        sem_close(es);
     }
-    
-    if (semctl(sem_id, 0, IPC_RMID) == -1) {
-        fprintf(stderr, RED "[ERROR] No se pudieron eliminar los semáforos: %s\n" RESET, 
-                strerror(errno));
-        return ERROR;
+    if (di != SEM_FAILED) {
+        for (int i = 0; i < buffer_size; i++) sem_post(di);
+        sem_close(di);
     }
-    
-    printf(GREEN "  ✓ Semáforos eliminados correctamente\n" RESET);
-    return SUCCESS;
-}
-
-// Despertar todos los procesos bloqueados (para finalización)
-void wake_all_blocked_processes(int sem_id, int buffer_size) {
-    // Incrementar sem_encrypt_spaces múltiples veces para despertar emisores
-    for (int i = 0; i < buffer_size; i++) {
-        sem_post_custom(sem_id, SEM_ENCRYPT_SPACES);
-    }
-    
-    // Incrementar sem_decrypt_items múltiples veces para despertar receptores
-    for (int i = 0; i < buffer_size; i++) {
-        sem_post_custom(sem_id, SEM_DECRYPT_ITEMS);
-    }
-    
-    printf(YELLOW "  ! Todos los procesos bloqueados han sido despertados\n" RESET);
+    printf(YELLOW "  ! Procesos bloqueados despertados (POSIX)\n" RESET);
 }

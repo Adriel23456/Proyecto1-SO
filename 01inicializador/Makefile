@@ -4,7 +4,7 @@
 # Compilador y flags
 CC = gcc
 CFLAGS = -Wall -Wextra -g -O2 -std=gnu11
-LDFLAGS = -lpthread
+LDFLAGS = -pthread -lrt
 
 # Directorios
 SRCDIR = src
@@ -92,42 +92,54 @@ clean-all: clean
 	@rm -f $(ASSETSDIR)/data.txt
 	@echo "$(GREEN)✓ Limpieza completa$(RESET)"
 
-# Limpiar memoria compartida y semáforos (usar con cuidado)
+# Limpiar memoria compartida y semáforos POSIX
 clean-ipc:
-	@echo "$(RED)$(BOLD)⚠ ADVERTENCIA: Esto eliminará TODA la memoria compartida y semáforos$(RESET)"
-	@read -p "¿Está seguro? (y/N): " confirm; \
-	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
-		echo "$(YELLOW)→ Limpiando IPC...$(RESET)"; \
-		ipcrm -M 0x1234 2>/dev/null || true; \
-		ipcrm -S 0x5000 2>/dev/null || true; \
-		echo "$(GREEN)✓ IPC limpiado$(RESET)"; \
-	else \
-		echo "$(CYAN)Operación cancelada$(RESET)"; \
-	fi
+	@echo "$(BOLD)$(RED)╔══════════════════════════════════════════════════════╗$(RESET)"
+	@echo "$(BOLD)$(RED)║                    LIMPIEZA DE IPC                   ║$(RESET)"
+	@echo "$(BOLD)$(RED)╚══════════════════════════════════════════════════════╝$(RESET)"
+	@mkdir -p $(BINDIR)
+	@echo '/* Helper para eliminar semáforos POSIX por nombre */ \
+		#include <stdio.h> \
+		#include <semaphore.h> \
+		#include "include/constants.h" \
+		int main(void){ \
+			const char* names[] = { \
+				SEM_NAME_GLOBAL_MUTEX, SEM_NAME_ENCRYPT_QUEUE, SEM_NAME_DECRYPT_QUEUE, \
+				SEM_NAME_ENCRYPT_SPACES, SEM_NAME_DECRYPT_ITEMS, NULL \
+			}; \
+			int i, errs = 0; \
+			for(i=0; names[i]; ++i){ \
+				if (sem_unlink(names[i]) == -1) errs++; \
+			} \
+			printf("Semáforos POSIX eliminados (si existían).\\n"); \
+			return errs ? 0 : 0; \
+		}' | $(CC) -x c - -I$(INCDIR) -o $(BINDIR)/sem_cleanup $(LDFLAGS)
+	@$(BINDIR)/sem_cleanup || true
+	@ipcrm -M 0x1234 2>/dev/null || true
+	@echo "$(GREEN)✓ IPC limpiado$(RESET)"
 
-# Ver estado de la memoria compartida y semáforos
+# Ver estado de SHM y semáforos POSIX y límites útiles
 status:
 	@echo "$(BOLD)$(CYAN)╔════════════════════════════════════════════╗$(RESET)"
-	@echo "$(BOLD)$(CYAN)║        Estado del Sistema IPC              ║$(RESET)"
+	@echo "$(BOLD)$(CYAN)║        Estado del Sistema IPC y Límites    ║$(RESET)"
 	@echo "$(BOLD)$(CYAN)╚════════════════════════════════════════════╝$(RESET)"
 	@echo ""
-	@echo "$(YELLOW)→ Memoria Compartida:$(RESET)"
+	@echo "$(YELLOW)→ Memoria Compartida (System V):$(RESET)"
 	@ipcs -m | grep -E "0x00001234|key" || echo "  No hay memoria compartida activa"
 	@echo ""
-	@echo "$(YELLOW)→ Semáforos:$(RESET)"
-	@ipcs -s | grep -E "0x00005000|key" || echo "  No hay semáforos activos"
+	@echo "$(YELLOW)→ Semáforos POSIX (archivos en /dev/shm):$(RESET)"
+	@ls -l /dev/shm/sem.* 2>/dev/null || echo "  No hay semáforos POSIX visibles"
 	@echo ""
-
-# Debugging con valgrind
-debug: all
-	@echo "$(MAGENTA)→ Ejecutando con Valgrind...$(RESET)"
-	@cd $(BINDIR) && valgrind --leak-check=full --show-leak-kinds=all \
-		--track-origins=yes ./$(TARGET) ../$(ASSETSDIR)/data.txt 10 AA
-
-# Debugging con gdb
-gdb: all
-	@echo "$(MAGENTA)→ Ejecutando con GDB...$(RESET)"
-	@cd $(BINDIR) && gdb ./$(TARGET)
+	@echo "$(YELLOW)→ Límites POSIX y /dev/shm:$(RESET)"
+	@echo "  SEM_VALUE_MAX = $$(getconf SEM_VALUE_MAX 2>/dev/null || echo desconocido)"
+	@df -h /dev/shm | sed 1d || true
+	@echo ""
+	@echo "$(YELLOW)→ Límites de Memoria Compartida (System V):$(RESET)"
+	@ipcs -lm || true
+	@echo "  shmmax = $$(cat /proc/sys/kernel/shmmax 2>/dev/null || echo desconocido)"
+	@echo "  shmall = $$(cat /proc/sys/kernel/shmall 2>/dev/null || echo desconocido)"
+	@echo "  PAGESIZE = $$(getconf PAGESIZE 2>/dev/null || echo desconocido)"
+	@echo ""
 
 # Ayuda
 help:
@@ -140,15 +152,10 @@ help:
 	@echo "$(GREEN)make run-custom$(RESET)- Ejecutar con parámetros personalizados"
 	@echo "$(GREEN)make clean$(RESET)     - Limpiar archivos compilados"
 	@echo "$(GREEN)make clean-all$(RESET) - Limpiar todo incluyendo archivos generados"
-	@echo "$(GREEN)make clean-ipc$(RESET) - Limpiar memoria compartida y semáforos"
-	@echo "$(GREEN)make status$(RESET)    - Ver estado del sistema IPC"
-	@echo "$(GREEN)make debug$(RESET)     - Ejecutar con Valgrind"
-	@echo "$(GREEN)make gdb$(RESET)       - Ejecutar con GDB"
+	@echo "$(GREEN)make clean-ipc$(RESET) - Eliminar SHM y semáforos POSIX"
+	@echo "$(GREEN)make status$(RESET)    - Ver estado y límites del sistema"
 	@echo "$(GREEN)make help$(RESET)      - Mostrar esta ayuda"
 	@echo ""
 
-# Phony targets
-.PHONY: all directories run run-custom clean clean-all clean-ipc status debug gdb help assets
-
-# Regla por defecto
+.PHONY: all directories run run-custom clean clean-all clean-ipc status help assets
 .DEFAULT_GOAL := all

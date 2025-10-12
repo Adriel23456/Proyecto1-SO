@@ -4,81 +4,100 @@
 #include <time.h>
 #include <sys/types.h>
 
-// Estructura para cada carácter en memoria compartida
+/*
+ * Estructura para cada carácter en memoria compartida:
+ *  - ascii_value: valor encriptado cuando el slot está en uso.
+ *  - slot_index: índice fijo del slot [1..buffer_size].
+ *  - timestamp: marca de tiempo de inserción (0 si vacío).
+ *  - is_valid: 0 = vacío, 1 = ocupado.
+ *  - text_index: índice del texto original.
+ *  - emisor_pid: PID del emisor que escribió el slot.
+ */
 typedef struct {
-    unsigned char ascii_value;    // Valor ASCII (encriptado cuando esté en uso)
-    int slot_index;               // Índice del slot (1, 2, 3, ..., estático)
-    time_t timestamp;             // Hora de introducción (0 = vacío)
-    int is_valid;                 // Flag de validez (0 = vacío, 1 = ocupado)
-    int text_index;               // Índice en el texto original
-    pid_t emisor_pid;             // PID del emisor que lo escribió
+    unsigned char ascii_value;
+    int           slot_index;
+    time_t        timestamp;
+    int           is_valid;
+    int           text_index;
+    pid_t         emisor_pid;
 } CharacterSlot;
 
-// Nodo para las colas
-typedef struct QueueNode {
-    int slot_index;               // Índice del slot en el buffer
-    int text_index;               // Índice del texto (solo para QueueDeencript)
-    struct QueueNode* next;       // Siguiente nodo
-} QueueNode;
-
-// Estructura de cola
+/*
+ * Referencia de slot para colas:
+ *  - slot_index: índice del slot del buffer [0..buffer_size-1].
+ *  - text_index: índice del texto (para decrypt); -1 cuando no aplica.
+ */
 typedef struct {
-    QueueNode* front;             // Frente de la cola
-    QueueNode* rear;              // Final de la cola
-    int size;                     // Tamaño actual
-    int max_size;                 // Tamaño máximo
+    int slot_index;
+    int text_index;
+} SlotRef;
+
+/*
+ * Cola en memoria compartida basada en ring buffer:
+ *  - head/tail/size/capacity: estado de la cola (circular).
+ *  - array_offset: offset dentro de la SHM del array SlotRef[capacity].
+ */
+typedef struct {
+    int     head;
+    int     tail;
+    int     size;
+    int     capacity;
+    size_t  array_offset;
 } Queue;
 
-// Estructura principal de memoria compartida
+/*
+ * Estructura principal de memoria compartida:
+ *  - Contiene metadatos, colas y offsets para acceder a regiones dinámicas.
+ *  - Los datos dinámicos van al final del segmento:
+ *      [CharacterSlot buffer[buffer_size]]
+ *      [unsigned char file_data[file_data_size]]
+ *      [SlotRef encrypt_queue_array[buffer_size]]
+ *      [SlotRef decrypt_queue_array[buffer_size]]
+ */
 typedef struct {
     // Información del sistema
-    int shm_id;                   // ID de memoria compartida
-    int buffer_size;              // Tamaño del buffer circular
-    unsigned char encryption_key; // Clave de encriptación XOR
-    
+    int            shm_id;
+    int            buffer_size;
+    unsigned char  encryption_key;
+
     // Índices y contadores
-    int current_txt_index;        // Índice actual del texto
-    int total_chars_in_file;      // Total de caracteres en archivo
-    int total_chars_processed;    // Total de caracteres procesados
-    
+    int current_txt_index;
+    int total_chars_in_file;
+    int total_chars_processed;
+
     // Estadísticas
-    int total_emisores;           // Total de emisores creados
-    int active_emisores;          // Emisores activos actualmente
-    int total_receptores;         // Total de receptores creados
-    int active_receptores;        // Receptores activos actualmente
-    
+    int  total_emisores;
+    int  active_emisores;
+    int  total_receptores;
+    int  active_receptores;
+
     // Control de finalización
-    int shutdown_flag;            // Señal de cierre (0 = activo, 1 = finalizar)
-    
+    int  shutdown_flag;
+
     // Información del archivo
-    char input_filename[256];     // Nombre del archivo de entrada
-    int file_data_size;          // Tamaño del archivo binario
-    
-    // PIDs de procesos activos
-    pid_t emisor_pids[100];       // PIDs de emisores activos
-    pid_t receptor_pids[100];     // PIDs de receptores activos
-    
-    // Semáforos (usando índices para memoria compartida)
-    int sem_global_mutex;         // Semáforo para acceso global
-    int sem_encrypt_queue;        // Semáforo para cola de encriptación
-    int sem_decrypt_queue;        // Semáforo para cola de desencriptación
-    int sem_encrypt_spaces;       // Contador de espacios disponibles
-    int sem_decrypt_items;        // Contador de items disponibles
-    
+    char  input_filename[256];
+    int   file_data_size;
+
+    // PIDs de procesos activos (registro básico)
+    pid_t emisor_pids[100];
+    pid_t receptor_pids[100];
+
+    // Índices de semáforos (dentro del set System V)
+    int sem_global_mutex;
+    int sem_encrypt_queue;
+    int sem_decrypt_queue;
+    int sem_encrypt_spaces;
+    int sem_decrypt_items;
+
     // Colas embebidas
-    Queue encrypt_queue;          // Cola de posiciones disponibles
-    Queue decrypt_queue;          // Cola de posiciones con datos
-    
-    // Offset donde comienza el buffer de caracteres
-    size_t buffer_offset;         // Offset al buffer de CharacterSlot
-    
-    // Offset donde comienza el archivo binario
-    size_t file_data_offset;      // Offset al contenido del archivo
-    
-    // Los datos dinámicos van al final (buffer + archivo binario)
-    // CharacterSlot buffer[buffer_size];
-    // unsigned char file_data[file_data_size];
-    
+    Queue encrypt_queue;  // Slots disponibles para escribir
+    Queue decrypt_queue;  // Slots con datos para leer
+
+    // Offsets de regiones dinámicas
+    size_t buffer_offset;     // Base de CharacterSlot[buffer_size]
+    size_t file_data_offset;  // Base de file_data[file_data_size]
+    // Los arrays de colas se ubican por array_offset en cada Queue
+
 } SharedMemory;
 
 #endif // STRUCTURES_H

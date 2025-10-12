@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # setup.sh - Script de configuración e instalación
 # Sistema de Comunicación entre Procesos con Memoria Compartida
 
@@ -46,10 +45,9 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Función para detectar el sistema operativo
+# Detectar sistema operativo
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # Detectar distribución específica
         if [ -f /etc/debian_version ]; then
             echo "debian"
         elif [ -f /etc/redhat-release ]; then
@@ -72,7 +70,6 @@ install_dependencies() {
     echo ""
     
     OS=$(detect_os)
-    
     echo -e "${CYAN}→ Sistema detectado: ${OS}${RESET}"
     echo ""
     
@@ -80,49 +77,35 @@ install_dependencies() {
         debian)
             echo -e "${YELLOW}→ Actualizando repositorios...${RESET}"
             sudo apt-get update
-            
             echo -e "${YELLOW}→ Instalando herramientas de desarrollo...${RESET}"
             sudo apt-get install -y build-essential gcc make
-            
             echo -e "${YELLOW}→ Instalando bibliotecas del sistema...${RESET}"
             sudo apt-get install -y libc6-dev
-            
             echo -e "${YELLOW}→ Instalando herramientas de debugging (opcional)...${RESET}"
             sudo apt-get install -y gdb valgrind
-            
-            echo -e "${YELLOW}→ Instalando utilidades IPC...${RESET}"
-            sudo apt-get install -y ipcs
+            # ipcs forma parte de util-linux (suele venir instalado por defecto)
+            sudo apt-get install -y util-linux >/dev/null 2>&1 || true
             ;;
-            
         redhat)
             echo -e "${YELLOW}→ Instalando grupo de desarrollo...${RESET}"
             sudo yum groupinstall -y "Development Tools"
-            
             echo -e "${YELLOW}→ Instalando bibliotecas del sistema...${RESET}"
             sudo yum install -y glibc-devel
-            
             echo -e "${YELLOW}→ Instalando herramientas de debugging (opcional)...${RESET}"
             sudo yum install -y gdb valgrind
             ;;
-            
         arch)
             echo -e "${YELLOW}→ Actualizando sistema...${RESET}"
-            sudo pacman -Syu
-            
+            sudo pacman -Syu --noconfirm
             echo -e "${YELLOW}→ Instalando herramientas de desarrollo...${RESET}"
-            sudo pacman -S --needed base-devel gcc make
-            
+            sudo pacman -S --needed --noconfirm base-devel gcc make
             echo -e "${YELLOW}→ Instalando herramientas de debugging (opcional)...${RESET}"
-            sudo pacman -S --needed gdb valgrind
+            sudo pacman -S --needed --noconfirm gdb valgrind
             ;;
-            
         *)
             echo -e "${RED}⚠ Sistema no soportado automáticamente${RESET}"
-            echo -e "${YELLOW}Por favor, instale manualmente:${RESET}"
-            echo "  - GCC compiler"
-            echo "  - Make"
-            echo "  - Development headers for libc"
-            echo "  - GDB y Valgrind (opcional)"
+            echo -e "${YELLOW}Instalar manualmente:${RESET}"
+            echo "  - GCC, Make, libc-dev, GDB, Valgrind"
             return 1
             ;;
     esac
@@ -138,21 +121,17 @@ build_project() {
     echo -e "${BOLD}${BLUE}╚════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
     
-    # Verificar que gcc esté instalado
     if ! command_exists gcc; then
         echo -e "${RED}⚠ GCC no está instalado${RESET}"
         echo -e "${YELLOW}Ejecute la opción 1 para instalar dependencias${RESET}"
         return 1
     fi
-    
-    # Verificar que make esté instalado
     if ! command_exists make; then
         echo -e "${RED}⚠ Make no está instalado${RESET}"
         echo -e "${YELLOW}Ejecute la opción 1 para instalar dependencias${RESET}"
         return 1
     fi
     
-    # Compilar usando make
     echo -e "${YELLOW}→ Limpiando compilaciones anteriores...${RESET}"
     make clean
     
@@ -208,7 +187,7 @@ check_ipc_status() {
     make status
 }
 
-# Limpiar IPC
+# Limpiar IPC (SHM + semáforos POSIX)
 clean_ipc() {
     echo -e "${BOLD}${RED}╔════════════════════════════════════════════════════════════╗${RESET}"
     echo -e "${BOLD}${RED}║                    LIMPIEZA DE IPC                         ║${RESET}"
@@ -250,53 +229,43 @@ verify_installation() {
     
     local all_ok=true
     
-    # Verificar GCC
     echo -n -e "${YELLOW}→ Verificando GCC... ${RESET}"
     if command_exists gcc; then
-        gcc_version=$(gcc --version | head -n1)
-        echo -e "${GREEN}✓${RESET} ($gcc_version)"
+        gcc --version | head -n1
     else
         echo -e "${RED}✗ No instalado${RESET}"
         all_ok=false
     fi
     
-    # Verificar Make
     echo -n -e "${YELLOW}→ Verificando Make... ${RESET}"
     if command_exists make; then
-        make_version=$(make --version | head -n1)
-        echo -e "${GREEN}✓${RESET} ($make_version)"
+        make --version | head -n1
     else
         echo -e "${RED}✗ No instalado${RESET}"
         all_ok=false
     fi
     
-    # Verificar ipcs
     echo -n -e "${YELLOW}→ Verificando ipcs... ${RESET}"
     if command_exists ipcs; then
         echo -e "${GREEN}✓${RESET}"
     else
-        echo -e "${YELLOW}⚠ No instalado (opcional)${RESET}"
+        echo -e "${YELLOW}⚠ No encontrado (suele venir en util-linux)${RESET}"
     fi
     
-    # Verificar GDB
     echo -n -e "${YELLOW}→ Verificando GDB... ${RESET}"
     if command_exists gdb; then
-        gdb_version=$(gdb --version | head -n1)
-        echo -e "${GREEN}✓${RESET} ($gdb_version)"
+        gdb --version | head -n1
     else
         echo -e "${YELLOW}⚠ No instalado (opcional)${RESET}"
     fi
     
-    # Verificar Valgrind
     echo -n -e "${YELLOW}→ Verificando Valgrind... ${RESET}"
     if command_exists valgrind; then
-        valgrind_version=$(valgrind --version)
-        echo -e "${GREEN}✓${RESET} ($valgrind_version)"
+        valgrind --version
     else
         echo -e "${YELLOW}⚠ No instalado (opcional)${RESET}"
     fi
     
-    # Verificar ejecutable
     echo -n -e "${YELLOW}→ Verificando ejecutable... ${RESET}"
     if [ -f "bin/inicializador" ]; then
         echo -e "${GREEN}✓${RESET} (bin/inicializador)"
@@ -305,7 +274,6 @@ verify_installation() {
     fi
     
     echo ""
-    
     if [ "$all_ok" = true ]; then
         echo -e "${GREEN}✓ Sistema listo para usar${RESET}"
     else
@@ -319,52 +287,24 @@ main() {
     while true; do
         show_banner
         show_menu
-        
         read -r option
-        
         case $option in
-            1)
-                install_dependencies
-                ;;
-            2)
-                build_project
-                ;;
-            3)
-                build_and_run
-                ;;
-            4)
-                clean_project
-                ;;
-            5)
-                check_ipc_status
-                ;;
-            6)
-                clean_ipc
-                ;;
-            7)
-                full_install
-                ;;
-            8)
-                verify_installation
-                ;;
-            9)
-                echo ""
-                echo -e "${CYAN}¡Hasta luego!${RESET}"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}Opción inválida${RESET}"
-                ;;
+            1) install_dependencies ;;
+            2) build_project ;;
+            3) build_and_run ;;
+            4) clean_project ;;
+            5) check_ipc_status ;;
+            6) clean_ipc ;;
+            7) full_install ;;
+            8) verify_installation ;;
+            9) echo ""; echo -e "${CYAN}¡Hasta luego!${RESET}"; exit 0 ;;
+            *) echo -e "${RED}Opción inválida${RESET}" ;;
         esac
-        
         echo ""
         echo -e "${YELLOW}Presione Enter para continuar...${RESET}"
         read -r
     done
 }
 
-# Hacer el script ejecutable
 chmod +x "$0"
-
-# Ejecutar main
 main

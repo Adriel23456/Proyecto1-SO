@@ -1,9 +1,8 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-// Claves de memoria compartida y semáforos
+// Claves de memoria compartida (System V SHM)
 #define SHM_BASE_KEY 0x1234
-#define SEM_BASE_KEY 0x5000
 
 // Colores para output
 #define RED     "\x1b[31m"
@@ -17,37 +16,42 @@
 #define BOLD    "\x1b[1m"
 
 // Modos de ejecución
-#define MODE_AUTO 0
+#define MODE_AUTO   0
 #define MODE_MANUAL 1
 
-// Tamaños y límites
-#define MIN_BUFFER_SIZE 5
-#define MAX_BUFFER_SIZE 1000
-#define MAX_FILE_SIZE 1048576    // 1MB
-#define MAX_EMISORES 100
-#define MAX_RECEPTORES 100
-#define DEFAULT_DELAY_MS 100
+/*
+ * Tamaños y límites:
+ *  - MIN_BUFFER_SIZE: tamaño mínimo del buffer circular.
+ *  - MAX_FILE_SIZE: límite de seguridad; puede aumentarse o desactivarse lógicamente.
+ *  - MAX_BUFFER_SIZE: valor orientativo. El límite real depende de /dev/shm y shmmax.
+ */
+#define MIN_BUFFER_SIZE 1
+#define MAX_BUFFER_SIZE 100000000
+#define MAX_FILE_SIZE   1073741824  // 1 GiB
 
-// Nombres de semáforos para System V
-#define SEM_GLOBAL_MUTEX 0
-#define SEM_ENCRYPT_QUEUE 1
-#define SEM_DECRYPT_QUEUE 2
-#define SEM_ENCRYPT_SPACES 3
-#define SEM_DECRYPT_ITEMS 4
-#define NUM_SEMAPHORES 5
+// Semáforos POSIX nombrados (persisten en /dev/shm/sem.*)
+#define SEM_NAME_GLOBAL_MUTEX   "/sem_global_mutex"
+#define SEM_NAME_ENCRYPT_QUEUE  "/sem_encrypt_queue"
+#define SEM_NAME_DECRYPT_QUEUE  "/sem_decrypt_queue"
+#define SEM_NAME_ENCRYPT_SPACES "/sem_encrypt_spaces"
+#define SEM_NAME_DECRYPT_ITEMS  "/sem_decrypt_items"
 
-// Permisos IPC
+// Permisos para objetos IPC y archivos
 #define IPC_PERMS 0666
 
 // Estados de retorno
-#define SUCCESS 0
-#define ERROR -1
+#define SUCCESS  0
+#define ERROR   -1
 
 // Macros útiles
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 
-// Tamaño de página para alineación
+/*
+ * Tamaño de página:
+ *  - Se consulta con sysconf(_SC_PAGESIZE) en tiempo de ejecución.
+ *  - Esta constante se conserva para compatibilidad y mensajes.
+ */
 #define PAGE_SIZE 4096
 
 #endif // CONSTANTS_H
