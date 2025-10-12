@@ -256,14 +256,18 @@ ls -l /dev/shm/sem.*
 # Resumen de límites de SHM
 ipcs -lm
 
+# Listado de segmentos System V
+ipcs -m
+
 # Máximo tamaño de un segmento (bytes)
 cat /proc/sys/kernel/shmmax
 
 # Total de páginas disponibles (x tamaño de página)
 cat /proc/sys/kernel/shmall
 
-# Tamaño de página
-getconf PAGESIZE
+# Memoria del sistema (verás subir “Shmem” y bajar MemFree/MemAvailable)
+cat /proc/meminfo | egrep 'Shmem|MemFree|MemAvailable'
+free -h
 ```
 
 > 💡 **Recomendación:**

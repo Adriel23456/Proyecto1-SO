@@ -92,31 +92,16 @@ clean-all: clean
 	@rm -f $(ASSETSDIR)/data.txt
 	@echo "$(GREEN)✓ Limpieza completa$(RESET)"
 
-# Limpiar memoria compartida y semáforos POSIX
+# Limpiar memoria compartida System V y semáforos POSIX
+# - Para SHM: borra el segmento con nuestra key 0x1234 si existe
+# - Para POSIX semáforos: elimina archivos de /dev/shm con prefijo sem.sem.ipc_
 clean-ipc:
 	@echo "$(BOLD)$(RED)╔══════════════════════════════════════════════════════╗$(RESET)"
 	@echo "$(BOLD)$(RED)║                    LIMPIEZA DE IPC                   ║$(RESET)"
 	@echo "$(BOLD)$(RED)╚══════════════════════════════════════════════════════╝$(RESET)"
-	@mkdir -p $(BINDIR)
-	@echo '/* Helper para eliminar semáforos POSIX por nombre */ \
-		#include <stdio.h> \
-		#include <semaphore.h> \
-		#include "include/constants.h" \
-		int main(void){ \
-			const char* names[] = { \
-				SEM_NAME_GLOBAL_MUTEX, SEM_NAME_ENCRYPT_QUEUE, SEM_NAME_DECRYPT_QUEUE, \
-				SEM_NAME_ENCRYPT_SPACES, SEM_NAME_DECRYPT_ITEMS, NULL \
-			}; \
-			int i, errs = 0; \
-			for(i=0; names[i]; ++i){ \
-				if (sem_unlink(names[i]) == -1) errs++; \
-			} \
-			printf("Semáforos POSIX eliminados (si existían).\\n"); \
-			return errs ? 0 : 0; \
-		}' | $(CC) -x c - -I$(INCDIR) -o $(BINDIR)/sem_cleanup $(LDFLAGS)
-	@$(BINDIR)/sem_cleanup || true
 	@ipcrm -M 0x1234 2>/dev/null || true
-	@echo "$(GREEN)✓ IPC limpiado$(RESET)"
+	@rm -f /dev/shm/sem.sem.ipc_* 2>/dev/null || true
+	@echo "$(GREEN)✓ IPC limpiado (SHM y semáforos POSIX)$(RESET)"
 
 # Ver estado de SHM y semáforos POSIX y límites útiles
 status:
@@ -157,5 +142,8 @@ help:
 	@echo "$(GREEN)make help$(RESET)      - Mostrar esta ayuda"
 	@echo ""
 
+# Phony targets
 .PHONY: all directories run run-custom clean clean-all clean-ipc status help assets
+
+# Regla por defecto
 .DEFAULT_GOAL := all
