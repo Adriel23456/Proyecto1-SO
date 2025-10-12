@@ -3,10 +3,10 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/01inicializador/include/",
-                "${workspaceFolder}/02emisor/include/",
-                "${workspaceFolder}/03receptor/include/",
-                "${workspaceFolder}/04finalizador/include/",
+                "${workspaceFolder}/01inicializador/include/**",
+                "${workspaceFolder}/02emisor/include/**",
+                "${workspaceFolder}/03receptor/include/**",
+                "${workspaceFolder}/04finalizador/include/**",
                 "${workspaceFolder}/**"
             ],
             "defines": [],
