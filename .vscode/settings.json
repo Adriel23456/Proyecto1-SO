@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "semaphore_init.h": "c",
+        "file_processor.h": "c"
+    }
+}
