@@ -131,6 +131,10 @@ int main(int argc, char* argv[]) {
     strncpy(shm->input_filename, input_filename, sizeof(shm->input_filename) - 1);
     shm->input_filename[sizeof(shm->input_filename) - 1] = '\0';
     shm->file_data_size         = (int)file_size;
+    shm->emisor_stats_count = 0;
+    shm->receptor_stats_count = 0;
+    memset(shm->emisor_stats, 0, sizeof(shm->emisor_stats));
+    memset(shm->receptor_stats, 0, sizeof(shm->receptor_stats));
     printf(GREEN "  ✓ Estructura inicializada\n" RESET);
 
     // Paso 4: slots del buffer

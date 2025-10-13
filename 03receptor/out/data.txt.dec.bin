@@ -1,0 +1,15 @@
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
+Nisi ut aliquip ex ea commodo consequat.
+Duis aute irure dolor in reprehenderit in voluptate velit esse.
+Cillum dolore eu fugiat nulla pariatur.
+Excepteur sint occaecat cupidatat non proident.
+Sunt in culpa qui officia deserunt mollit anim id est laborum.
+Hello World! This is a test file for the shared memory system.
+Each character will be encrypted and transmitted sequentially.
+The system guarantees that the output maintains the same order!
+Testing special characters: @#$%^&*()_+-=[]{}|;':",./<>?
+Numbers: 0123456789
+UPPERCASE AND lowercase MiXeD CaSe
+End of test file.

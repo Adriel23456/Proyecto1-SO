@@ -460,6 +460,9 @@ int main(int argc, char* argv[]) {
     
     time_t t1 = time(NULL);
     int elapsed = (int)(t1 - t0);
+
+    // NUEVO: Guardar estadísticas antes de desregistrar
+    save_receptor_stats(shm, my_pid, chars_recv, t0, t1, g_sem_global);
     
     printf(BOLD YELLOW "\n╔══════════════════════════════════════════════════════════╗\n" RESET);
     printf(BOLD YELLOW "║             RECEPTOR PID %6d FINALIZANDO               ║\n" RESET, my_pid);
