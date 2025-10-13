@@ -1,18 +1,16 @@
 // src/output_file.c
-#define _POSIX_C_SOURCE 200809L
-#define _DEFAULT_SOURCE
+// NO definir _POSIX_C_SOURCE ni _DEFAULT_SOURCE aquí (ya están en CFLAGS del Makefile)
 #include "output_file.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <libgen.h>
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
 #include <limits.h>
-#include <stdlib.h>   // <-- necesario para getenv
+#include <stdlib.h>
 
 static int ensure_dir(const char* dir) {
     struct stat st;
@@ -24,21 +22,23 @@ static int ensure_dir(const char* dir) {
     return mkdir(dir, 0777);
 }
 
-static const char* safe_basename(const char* path, char* buf, size_t bufsz) {
-    if (!path || !buf || bufsz == 0) { errno = EINVAL; return NULL; }
-
-    size_t n = strnlen(path, PATH_MAX);
-    char tmp[PATH_MAX + 1];
-    if (n > PATH_MAX) n = PATH_MAX;
-    memcpy(tmp, path, n);
-    tmp[n] = '\0';
-
-    const char* b = basename(tmp);   // basename puede modificar el buffer
-    if (!b) { errno = EINVAL; return NULL; }
-
-    strncpy(buf, b, bufsz - 1);
-    buf[bufsz - 1] = '\0';
-    return buf;
+// Versión segura de basename que no modifica el input
+static void safe_basename(const char* path, char* out, size_t outsz) {
+    if (!path || !out || outsz == 0) return;
+    
+    // Encontrar la última barra
+    const char* last_slash = strrchr(path, '/');
+    const char* name = last_slash ? (last_slash + 1) : path;
+    
+    // Si está vacío o es solo "/", usar "output"
+    if (!name[0]) {
+        strncpy(out, "output", outsz - 1);
+        out[outsz - 1] = '\0';
+        return;
+    }
+    
+    strncpy(out, name, outsz - 1);
+    out[outsz - 1] = '\0';
 }
 
 int open_output_file(const char* shm_input_filename,
@@ -59,8 +59,10 @@ int open_output_file(const char* shm_input_filename,
     }
 
     char base[PATH_MAX + 1];
-    if (!safe_basename(shm_input_filename, base, sizeof(base))) {
-        // fallback por si no hay basename razonable
+    safe_basename(shm_input_filename, base, sizeof(base));
+    
+    // Si no hay basename válido, usar "output"
+    if (!base[0]) {
         strncpy(base, "output", sizeof(base) - 1);
         base[sizeof(base) - 1] = '\0';
     }

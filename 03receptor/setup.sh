@@ -194,7 +194,7 @@ show_active() {
     echo -e "${BOLD}${CYAN}║                  RECEPTORES ACTIVOS                        ║${RESET}"
     echo -e "${BOLD}${CYAN}╚════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
-    pgrep receptor | xargs -r -I{} ps -o pid,stat,pcpu,wchan,cmd -p {}
+    pgrep receptor | xargs -r -I{} ps -o pid,stat,pcpu,wchan,cmd -p {} || echo "  No hay receptores activos"
 }
 
 kill_all() {
@@ -202,8 +202,8 @@ kill_all() {
     echo -e "${BOLD}${RED}║              TERMINANDO RECEPTORES (SIGUSR1)               ║${RESET}"
     echo -e "${BOLD}${RED}╚════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
-    pgrep receptor | xargs -r -n1 -I{} kill -USR1 {}
-    echo -e "${GREEN}✓ Señal enviada${RESET}"
+    # CORREGIDO: Eliminado -n1 que era incompatible con -I{}
+    pgrep receptor | xargs -r -I{} kill -USR1 {} 2>/dev/null && echo -e "${GREEN}✓ Señal SIGUSR1 enviada a todos los receptores${RESET}" || echo -e "${YELLOW}No había receptores activos${RESET}"
 }
 
 clean_project() {
@@ -235,19 +235,48 @@ demo_no_busy_wait() {
     echo -e "${BOLD}${MAGENTA}║             DEMO: SIN BUSY WAITING                         ║${RESET}"
     echo -e "${BOLD}${MAGENTA}╚════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
-    echo -e "${CYAN}1) Vista en vivo de PID/STAT/CPU/wchan (Ctrl+C para salir)${RESET}"
-    echo -e "${YELLOW}   => Los receptores deben verse con wchan=futex, do_nanosleep o similares${RESET}"
+    echo -e "${CYAN}Esta demostración prueba que los receptores NO hacen busy waiting:${RESET}"
     echo ""
-    watch -n 0.5 'pgrep receptor | xargs -r -I{} ps -o pid,stat,pcpu,wchan,cmd -p {}'
+    echo -e "${GREEN}Evidencias de NO busy waiting:${RESET}"
+    echo -e "  1. ${YELLOW}STAT${RESET} debe ser 'S' (sleeping) no 'R' (running)"
+    echo -e "  2. ${YELLOW}%CPU${RESET} debe ser ~0% cuando no hay datos"
+    echo -e "  3. ${YELLOW}wchan${RESET} debe mostrar: futex, do_nanosleep, ppoll (bloqueado en kernel)"
     echo ""
-    echo -e "${CYAN}2) Adjuntar strace a un PID (muestra futex/ppoll/nanosleep)${RESET}"
-    echo -n "PID: "
-    read -r PID
-    if [[ "$PID" =~ ^[0-9]+$ ]]; then
-        sudo strace -tt -p "$PID" -e trace=futex,ppoll,select,clock_nanosleep,nanosleep
-    else
-        echo -e "${RED}PID inválido${RESET}"
-    fi
+    echo -e "${CYAN}Opciones:${RESET}"
+    echo -e "  ${YELLOW}1)${RESET} Vista en vivo con watch (actualización cada 0.5s)"
+    echo -e "  ${YELLOW}2)${RESET} Adjuntar strace a un PID específico"
+    echo -e "  ${YELLOW}3)${RESET} Volver"
+    echo ""
+    echo -n "Opción: "
+    read -r opt
+    
+    case $opt in
+        1)
+            echo ""
+            echo -e "${CYAN}Presione Ctrl+C para salir del monitoreo${RESET}"
+            echo -e "${YELLOW}Observe: STAT=S, %CPU≈0%, wchan=futex/do_nanosleep${RESET}"
+            sleep 2
+            watch -n 0.5 'pgrep receptor | xargs -r -I{} ps -o pid,stat,pcpu,wchan,cmd -p {}'
+            ;;
+        2)
+            echo ""
+            echo -n "PID del receptor a monitorear: "
+            read -r PID
+            if [[ "$PID" =~ ^[0-9]+$ ]]; then
+                echo ""
+                echo -e "${CYAN}Adjuntando strace al PID $PID...${RESET}"
+                echo -e "${YELLOW}Verá llamadas a futex (semáforos POSIX bloqueados)${RESET}"
+                echo -e "${YELLOW}Presione Ctrl+C para salir${RESET}"
+                sleep 2
+                sudo strace -tt -p "$PID" -e trace=futex,ppoll,select,clock_nanosleep,nanosleep
+            else
+                echo -e "${RED}PID inválido${RESET}"
+            fi
+            ;;
+        *)
+            return
+            ;;
+    esac
 }
 
 full_install() {

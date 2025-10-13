@@ -4,5 +4,6 @@
         "file_processor.h": "c",
         "queue_operations.h": "c",
         "output_file.h": "c"
-    }
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }

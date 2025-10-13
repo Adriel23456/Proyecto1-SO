@@ -61,19 +61,19 @@ void print_emission_status(SharedMemory* shm, int slot_index, char original,
     
     // Imprimir box con colores
     printf("%s╔════════════════════════════════════════════════════╗\n", color);
-    printf("║               CARÁCTER ENVIADO                    ║\n");
+    printf("║               CARÁCTER ENVIADO                     ║\n");
     printf("╠════════════════════════════════════════════════════╣\n");
-    printf("║%s PID Emisor: %-6d                                %s║\n", RESET, getpid(), color);
-    printf("║%s Índice texto: %-6d / %-6d                    %s║\n", RESET, 
+    printf("║%s PID Emisor: %-6d                                 %s║\n", RESET, getpid(), color);
+    printf("║%s Índice texto: %-6d / %-6d                      %s║\n", RESET, 
            text_index, shm->total_chars_in_file, color);
-    printf("║%s Slot memoria: %-3d                                 %s║\n", RESET, 
+    printf("║%s Slot memoria: %-3d                                  %s║\n", RESET, 
            slot_index + 1, color);
-    printf("║%s Original: '%-5s' (0x%02X)                         %s║\n", RESET, 
+    printf("║%s Original: '%-5s' (0x%02X)                           %s║\n", RESET, 
            safe_display, (unsigned char)original, color);
-    printf("║%s Encriptado: 0x%02X                                  %s║\n", RESET, 
+    printf("║%s Encriptado: 0x%02X                                   %s║\n", RESET, 
            encrypted, color);
-    printf("║%s Hora: %-8s                                  %s║\n", RESET, time_str, color);
-    printf("║%s Colas: [Libres: %3d] [Con datos: %3d]             %s║\n", RESET,
+    printf("║%s Hora: %-8s                                     %s║\n", RESET, time_str, color);
+    printf("║%s Colas: [Libres: %3d] [Con datos: %3d]              %s║\n", RESET,
            encrypt_slots, decrypt_items, color);
     printf("╚════════════════════════════════════════════════════╝\n%s", RESET);
 }
