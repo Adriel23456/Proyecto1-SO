@@ -10,10 +10,25 @@
 #include "constants.h"
 #include "structures.h"
 
-/*
- * Lectura del tamaño máximo de segmento de memoria compartida (System V).
- * Se consulta /proc/sys/kernel/shmmax; si no es accesible, se asume un valor muy alto
- * y se delega el chequeo a shmget.
+/**
+ * Módulo de Inicialización de Memoria Compartida
+ * 
+ * Este módulo maneja la creación y configuración del segmento de memoria
+ * compartida usado por todo el sistema. La memoria se estructura en regiones:
+ * 1. Estructura base SharedMemory
+ * 2. Buffer circular de CharacterSlot
+ * 3. Datos del archivo de entrada
+ * 4. Arrays para las colas de encriptación y desencriptación
+ */
+
+/**
+ * @brief Lee el tamaño máximo permitido para segmentos de memoria compartida
+ * 
+ * Consulta /proc/sys/kernel/shmmax para determinar el límite del sistema.
+ * Si no puede acceder al archivo, asume un valor muy alto y delega
+ * la validación a shmget.
+ * 
+ * @return Tamaño máximo en bytes para segmentos de memoria compartida
  */
 static unsigned long long read_shmmax_bytes(void) {
     FILE* f = fopen("/proc/sys/kernel/shmmax", "r");
@@ -27,13 +42,24 @@ static unsigned long long read_shmmax_bytes(void) {
     return v;
 }
 
-/*
- * Cálculo del tamaño total a reservar en el segmento de SHM:
- *  - estructura base
- *  - buffer de CharacterSlot[buffer_size]
- *  - datos del archivo file_data[file_size]
- *  - arrays de colas: 2 * SlotRef[buffer_size]
- * Se alinea al tamaño de página reportado por el sistema.
+/**
+ * @brief Calcula el tamaño total necesario para el segmento de memoria compartida
+ * 
+ * Calcula y alinea al tamaño de página el espacio total necesario para:
+ * - Estructura base SharedMemory
+ * - Buffer circular de CharacterSlot[buffer_size]
+ * - Datos del archivo file_data[file_size]
+ * - Arrays para las colas: 2 * SlotRef[buffer_size]
+ * 
+ * @param buffer_size Tamaño del buffer circular
+ * @param file_size Tamaño del archivo de entrada
+ * @param base_size_out Puntero para almacenar tamaño de estructura base
+ * @param buffer_bytes_out Puntero para almacenar tamaño del buffer
+ * @param file_bytes_out Puntero para almacenar tamaño de datos del archivo
+ * @param enc_queue_bytes_out Puntero para almacenar tamaño de cola de encriptación
+ * @param dec_queue_bytes_out Puntero para almacenar tamaño de cola de desencriptación
+ * @param page_size_out Puntero para almacenar tamaño de página del sistema
+ * @return Tamaño total alineado necesario para el segmento
  */
 static size_t compute_total_size_aligned(int buffer_size, int file_size,
                                          size_t* base_size_out,
@@ -69,9 +95,17 @@ static size_t compute_total_size_aligned(int buffer_size, int file_size,
     return aligned;
 }
 
-/*
- * Creación del segmento de memoria compartida con todas las regiones necesarias.
- * También configura los offsets y capacidades de las colas para el uso posterior.
+/**
+ * @brief Crea y configura el segmento de memoria compartida
+ * 
+ * Crea un nuevo segmento de memoria compartida con el tamaño necesario
+ * para todas las regiones del sistema. Configura los offsets y capacidades
+ * de las colas para su uso posterior. La disposición física es:
+ * [SharedMemory][CharacterSlot buffer][file_data][enc_queue][dec_queue]
+ * 
+ * @param buffer_size Tamaño del buffer circular
+ * @param file_size Tamaño del archivo de entrada
+ * @return Puntero a la estructura SharedMemory, NULL si hay error
  */
 SharedMemory* create_shared_memory(int buffer_size, int file_size) {
     key_t key = SHM_BASE_KEY;
@@ -139,8 +173,14 @@ SharedMemory* create_shared_memory(int buffer_size, int file_size) {
     return shm;
 }
 
-/*
- * Inicialización de los slots del buffer de caracteres.
+/**
+ * @brief Inicializa los slots del buffer circular
+ * 
+ * Configura cada slot del buffer circular con valores iniciales,
+ * estableciendo índices secuenciales y marcándolos como no válidos.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @param buffer_size Tamaño del buffer circular
  */
 void initialize_buffer_slots(SharedMemory* shm, int buffer_size) {
     CharacterSlot* buffer = (CharacterSlot*)((char*)shm + shm->buffer_offset);
@@ -164,8 +204,16 @@ void initialize_buffer_slots(SharedMemory* shm, int buffer_size) {
     }
 }
 
-/*
- * Copiar los datos del archivo al bloque file_data mapeado en SHM.
+/**
+ * @brief Copia los datos del archivo a la memoria compartida
+ * 
+ * Transfiere el contenido del archivo de entrada al área designada
+ * en la memoria compartida. Muestra una vista previa de los datos
+ * copiados para verificación.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @param file_data Buffer con los datos del archivo
+ * @param file_size Tamaño del archivo
  */
 void copy_file_to_shared_memory(SharedMemory* shm, unsigned char* file_data, int file_size) {
     unsigned char* shm_file_data = (unsigned char*)((char*)shm + shm->file_data_offset);
@@ -182,8 +230,15 @@ void copy_file_to_shared_memory(SharedMemory* shm, unsigned char* file_data, int
     printf("\n");
 }
 
-/*
- * Adjuntar a memoria compartida existente.
+/**
+ * @brief Conecta a un segmento de memoria compartida existente
+ * 
+ * Busca y se conecta a un segmento de memoria compartida usando
+ * la clave proporcionada. Útil para procesos que necesitan acceder
+ * a la memoria ya inicializada.
+ * 
+ * @param key Clave IPC de la memoria compartida
+ * @return Puntero a la estructura SharedMemory, NULL si hay error
  */
 SharedMemory* attach_shared_memory(key_t key) {
     int shmid = shmget(key, 0, 0);
@@ -201,8 +256,15 @@ SharedMemory* attach_shared_memory(key_t key) {
     return shm;
 }
 
-/*
- * Desadjuntar memoria compartida.
+/**
+ * @brief Desconecta de la memoria compartida
+ * 
+ * Desvincula el proceso del segmento de memoria compartida.
+ * Debe llamarse antes de finalizar cualquier proceso que use
+ * la memoria compartida.
+ * 
+ * @param shm Puntero a la estructura SharedMemory
+ * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
  */
 int detach_shared_memory(SharedMemory* shm) {
     if (shmdt(shm) == -1) {
@@ -212,8 +274,15 @@ int detach_shared_memory(SharedMemory* shm) {
     return SUCCESS;
 }
 
-/*
- * Eliminar memoria compartida (uso exclusivo del proceso finalizador).
+/**
+ * @brief Elimina el segmento de memoria compartida
+ * 
+ * Elimina completamente el segmento de memoria compartida del sistema.
+ * Esta función debe ser usada exclusivamente por el proceso finalizador
+ * cuando todo el sistema está terminando.
+ * 
+ * @param shm Puntero a la estructura SharedMemory
+ * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
  */
 int cleanup_shared_memory(SharedMemory* shm) {
     key_t key = SHM_BASE_KEY;
@@ -228,8 +297,12 @@ int cleanup_shared_memory(SharedMemory* shm) {
     return SUCCESS;
 }
 
-/*
- * Accesos convenientes por offset.
+/**
+ * @brief Funciones de acceso a regiones específicas de la memoria compartida
+ * 
+ * Proporcionan acceso directo a las diferentes regiones de la memoria
+ * compartida usando los offsets configurados. Evitan el uso directo
+ * de aritmética de punteros.
  */
 CharacterSlot* get_buffer_pointer(SharedMemory* shm) {
     return (CharacterSlot*)((char*)shm + shm->buffer_offset);

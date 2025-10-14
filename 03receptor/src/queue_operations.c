@@ -1,5 +1,14 @@
-// queue_operations.c
-// Implementación de operaciones sobre colas circulares en SHM
+/**
+ * Módulo de Operaciones sobre Colas
+ * 
+ * Este módulo implementa las operaciones específicas del receptor sobre
+ * las colas circulares en memoria compartida. Maneja la extracción ordenada
+ * de slots para desencriptación y la devolución de slots libres a la cola
+ * de encriptación.
+ * 
+ * Las colas se implementan usando offsets en lugar de punteros directos
+ * para garantizar la validez de las referencias entre procesos.
+ */
 
 #include <stdio.h>
 #include <limits.h>
@@ -10,10 +19,28 @@
  * Macros para acceder a los arrays de las colas mediante sus offsets
  * Esto evita usar punteros inválidos entre procesos
  */
+/**
+ * @brief Obtiene el array de slots de la cola de encriptación
+ * 
+ * Calcula la dirección del array de slots de encriptación usando
+ * el offset almacenado en la memoria compartida.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @return Puntero al array de slots de encriptación
+ */
 static inline SlotRef* enc_array(SharedMemory* shm) {
     return (SlotRef*)((char*)shm + shm->encrypt_queue.array_offset);
 }
 
+/**
+ * @brief Obtiene el array de slots de la cola de desencriptación
+ * 
+ * Calcula la dirección del array de slots de desencriptación usando
+ * el offset almacenado en la memoria compartida.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @return Puntero al array de slots de desencriptación
+ */
 static inline SlotRef* dec_array(SharedMemory* shm) {
     return (SlotRef*)((char*)shm + shm->decrypt_queue.array_offset);
 }
@@ -28,6 +55,21 @@ static inline SlotRef* dec_array(SharedMemory* shm) {
  * 
  * Esto garantiza que los receptores procesen los caracteres en orden secuencial
  * sin importar el orden en que fueron producidos por múltiples emisores.
+ */
+/**
+ * @brief Extrae el próximo slot a desencriptar en orden secuencial
+ * 
+ * Extrae el slot con el menor text_index de la cola de desencriptación.
+ * Esto garantiza que los caracteres se procesen en el orden correcto del
+ * texto original, independientemente del orden en que fueron encriptados.
+ * 
+ * El algoritmo:
+ * 1. Busca linealmente el elemento con menor text_index
+ * 2. Rota la cola para que ese elemento quede en head
+ * 3. Extrae el elemento de head
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @return Información del slot extraído (índices -1 si no hay slots)
  */
 SlotInfo dequeue_decrypt_slot_ordered(SharedMemory* shm) {
     SlotInfo info = { .slot_index = -1, .text_index = -1 };
@@ -75,6 +117,17 @@ SlotInfo dequeue_decrypt_slot_ordered(SharedMemory* shm) {
  * 
  * Esto permite que los emisores puedan reutilizar el slot para
  * escribir un nuevo carácter encriptado.
+ */
+/**
+ * @brief Devuelve un slot libre a la cola de encriptación
+ * 
+ * Una vez que un slot ha sido desencriptado, se devuelve a la cola de
+ * slots libres para que los emisores puedan reutilizarlo para nuevos
+ * caracteres encriptados.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @param slot_index Índice del slot a devolver
+ * @return SUCCESS si el slot se encoló correctamente, ERROR en caso contrario
  */
 int enqueue_encrypt_slot(SharedMemory* shm, int slot_index) {
     if (!shm) return ERROR;

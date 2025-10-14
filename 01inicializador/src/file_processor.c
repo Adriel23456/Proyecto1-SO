@@ -8,10 +8,25 @@
 #include "file_processor.h"
 #include "constants.h"
 
-/*
- * Procesar el archivo de entrada y generar el .bin.
- * Lee el archivo completo en memoria, genera un .bin para inspección
- * y retorna el buffer con su tamaño en *file_size.
+/**
+ * Módulo de Procesamiento de Archivos
+ * 
+ * Este módulo se encarga de manejar todas las operaciones relacionadas con
+ * el archivo de entrada, incluyendo su lectura, procesamiento y validación.
+ * También genera un archivo binario para inspección y proporciona funciones
+ * de utilidad para acceder a los datos en memoria compartida.
+ */
+
+/**
+ * @brief Procesa el archivo de entrada y genera una versión binaria
+ * 
+ * Lee el archivo completo en memoria, realiza validaciones de tamaño
+ * y contenido, genera un archivo .bin para inspección y retorna el
+ * buffer con los datos leídos.
+ * 
+ * @param filename Nombre del archivo a procesar
+ * @param file_size Puntero donde se almacenará el tamaño del archivo
+ * @return Puntero al buffer con los datos, NULL si hay error
  */
 unsigned char* process_input_file(const char* filename, size_t* file_size) {
     FILE* input_file = fopen(filename, "r");
@@ -70,8 +85,16 @@ unsigned char* process_input_file(const char* filename, size_t* file_size) {
     return data;
 }
 
-/*
- * Escribir archivo binario con permisos 0666.
+/**
+ * @brief Escribe los datos en un archivo binario
+ * 
+ * Crea un archivo binario con los datos proporcionados y establece
+ * los permisos adecuados (0666) para que otros procesos puedan leerlo.
+ * 
+ * @param filename Nombre del archivo a crear
+ * @param data Buffer con los datos a escribir
+ * @param size Tamaño de los datos
+ * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
  */
 int write_binary_file(const char* filename, const unsigned char* data, size_t size) {
     FILE* bin_file = fopen(filename, "wb");
@@ -93,8 +116,15 @@ int write_binary_file(const char* filename, const unsigned char* data, size_t si
     return SUCCESS;
 }
 
-/*
- * Estadísticas de contenido del archivo.
+/**
+ * @brief Analiza y muestra estadísticas del contenido del archivo
+ * 
+ * Recorre el buffer de datos contando diferentes tipos de caracteres
+ * y muestra un resumen estadístico incluyendo caracteres imprimibles,
+ * espacios, saltos de línea y otros caracteres.
+ * 
+ * @param data Buffer con los datos a analizar
+ * @param size Tamaño del buffer
  */
 void print_file_statistics(const unsigned char* data, size_t size) {
     size_t printable_chars = 0, spaces = 0, newlines = 0, others = 0;
@@ -114,8 +144,15 @@ void print_file_statistics(const unsigned char* data, size_t size) {
     printf("    - Otros caracteres: %zu\n", others);
 }
 
-/*
- * Leer un carácter desde la SHM en la posición solicitada.
+/**
+ * @brief Lee un carácter específico de la memoria compartida
+ * 
+ * Accede a la memoria compartida y retorna el carácter ubicado
+ * en la posición solicitada, realizando validaciones de límites.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @param position Posición del carácter a leer
+ * @return El carácter en la posición indicada, '\0' si la posición es inválida
  */
 char read_char_at_position(SharedMemory* shm, int position) {
     if (position < 0) return '\0';
@@ -124,8 +161,14 @@ char read_char_at_position(SharedMemory* shm, int position) {
     return (char)file_data[position];
 }
 
-/*
- * Verificación básica de integridad de file_data en SHM.
+/**
+ * @brief Verifica la integridad de los datos en memoria compartida
+ * 
+ * Realiza una verificación básica para asegurar que los datos
+ * en la memoria compartida no están vacíos o corruptos.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @return SUCCESS si los datos parecen válidos, ERROR en caso contrario
  */
 int validate_file_in_shared_memory(SharedMemory* shm) {
     unsigned char* file_data = (unsigned char*)((char*)shm + shm->file_data_offset);

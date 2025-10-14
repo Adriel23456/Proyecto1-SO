@@ -8,6 +8,24 @@
 #include "shared_memory_access.h"
 #include "constants.h"
 
+/**
+ * Módulo de Acceso a Memoria Compartida para el Emisor
+ * 
+ * Este módulo proporciona las funciones necesarias para que el emisor
+ * interactúe con la memoria compartida, incluyendo la conexión inicial,
+ * lectura de datos y almacenamiento de caracteres procesados.
+ */
+
+/**
+ * @brief Conecta el emisor a la memoria compartida existente
+ * 
+ * Busca y se conecta al segmento de memoria compartida usando la clave
+ * proporcionada. Realiza validaciones básicas para asegurar que la
+ * memoria está correctamente inicializada.
+ * 
+ * @param key Clave IPC del segmento de memoria compartida
+ * @return Puntero a la estructura SharedMemory, NULL si hay error
+ */
 SharedMemory* attach_shared_memory(key_t key) {
     int shmid = shmget(key, 0, 0);
     if (shmid == -1) {
@@ -31,6 +49,15 @@ SharedMemory* attach_shared_memory(key_t key) {
     return shm;
 }
 
+/**
+ * @brief Desconecta el emisor de la memoria compartida
+ * 
+ * Libera la conexión del emisor con el segmento de memoria compartida.
+ * Esta función debe llamarse antes de que el emisor termine.
+ * 
+ * @param shm Puntero a la estructura SharedMemory
+ * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
+ */
 int detach_shared_memory(SharedMemory* shm) {
     if (shm == NULL) return SUCCESS;
     
@@ -41,6 +68,16 @@ int detach_shared_memory(SharedMemory* shm) {
     return SUCCESS;
 }
 
+/**
+ * @brief Lee un carácter del archivo original en memoria compartida
+ * 
+ * Accede a la región de datos del archivo en la memoria compartida
+ * y retorna el carácter en la posición especificada.
+ * 
+ * @param shm Puntero a la estructura SharedMemory
+ * @param position Posición del carácter a leer
+ * @return El carácter leído, o '\0' si la posición es inválida
+ */
 char read_char_at_position(SharedMemory* shm, int position) {
     if (shm == NULL) return '\0';
     if (position < 0 || position >= shm->file_data_size) return '\0';
@@ -49,6 +86,19 @@ char read_char_at_position(SharedMemory* shm, int position) {
     return (char)file_data[position];
 }
 
+/**
+ * @brief Almacena un carácter encriptado en el buffer circular
+ * 
+ * Guarda un carácter procesado en el slot especificado del buffer,
+ * junto con metadatos como el timestamp, índice original y PID del
+ * emisor que lo procesó.
+ * 
+ * @param shm Puntero a la estructura SharedMemory
+ * @param slot_index Índice del slot donde guardar el carácter
+ * @param encrypted_char Carácter ya encriptado
+ * @param text_index Posición original en el texto
+ * @param emisor_pid PID del emisor que procesó el carácter
+ */
 void store_character(SharedMemory* shm, int slot_index, unsigned char encrypted_char, 
                      int text_index, pid_t emisor_pid) {
     if (shm == NULL || slot_index < 0 || slot_index >= shm->buffer_size) return;

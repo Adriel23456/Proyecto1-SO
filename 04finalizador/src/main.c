@@ -5,8 +5,35 @@
 #include "signal_handler.h"
 #include "shared_memory_access.h"
 
+/**
+ * Finalizador del Sistema IPC
+ * 
+ * Este programa implementa un mecanismo de finalización elegante para
+ * el sistema de comunicación entre procesos. Su función principal es
+ * esperar una señal externa (simulando un botón físico) y coordinar
+ * el cierre ordenado de todos los procesos emisores y receptores.
+ * 
+ * El finalizador:
+ * 1. Espera la activación de un trigger (simulando botón físico)
+ * 2. Notifica a todos los procesos que deben terminar
+ * 3. Espera a que todos los procesos terminen
+ * 4. Muestra estadísticas finales de la ejecución
+ */
+
 extern volatile sig_atomic_t shutdown_requested;
 
+/**
+ * @brief Función principal del finalizador
+ * 
+ * Coordina todo el proceso de finalización del sistema:
+ * 1. Configura el manejo de señales y el mecanismo de trigger
+ * 2. Espera la activación del trigger
+ * 3. Notifica a todos los procesos
+ * 4. Espera su finalización
+ * 5. Muestra estadísticas
+ * 
+ * @return 0 si la finalización fue exitosa, 1 en caso de error
+ */
 int main() {
     printf("\033[1;36m╔════════════════════════════════════════════════════════════╗\033[0m\n");
     printf("\033[1;36m║                     FINALIZADOR                            ║\033[0m\n");

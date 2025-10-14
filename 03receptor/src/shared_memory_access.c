@@ -1,5 +1,15 @@
-// shared_memory_access.c
-// Implementación de funciones para manejo de memoria compartida System V
+/**
+ * Módulo de Acceso a Memoria Compartida
+ * 
+ * Este módulo proporciona las funciones necesarias para que el receptor
+ * acceda a la memoria compartida System V creada por el inicializador.
+ * Incluye funciones para conectarse y desconectarse de la memoria compartida,
+ * así como para acceder a las estructuras de datos dentro de ella de manera
+ * segura usando offsets en lugar de punteros directos.
+ * 
+ * La memoria compartida contiene un buffer circular de slots de caracteres
+ * y las colas de sincronización entre emisores y receptores.
+ */
 
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +21,16 @@
 
 /**
  * Conecta el proceso a la memoria compartida creada por el inicializador
+ */
+/**
+ * @brief Conecta el proceso a la memoria compartida existente
+ * 
+ * Localiza y se conecta al segmento de memoria compartida usando la clave
+ * proporcionada. Realiza verificaciones básicas de integridad para
+ * asegurar que la memoria está correctamente inicializada.
+ * 
+ * @param key Clave IPC que identifica el segmento de memoria
+ * @return Puntero a la memoria compartida o NULL en caso de error
  */
 SharedMemory* attach_shared_memory(key_t key) {
     // Obtener ID del segmento existente
@@ -42,6 +62,16 @@ SharedMemory* attach_shared_memory(key_t key) {
  * Desconecta el proceso de la memoria compartida
  * NOTA: Esto NO destruye el segmento, solo desadjunta el proceso
  */
+/**
+ * @brief Desconecta el proceso de la memoria compartida
+ * 
+ * Desvincula el proceso del segmento de memoria compartida.
+ * Esto no destruye el segmento, solo elimina el mapeo en el
+ * espacio de direcciones del proceso actual.
+ * 
+ * @param shm Puntero a la memoria compartida a desconectar
+ * @return SUCCESS en caso de éxito, ERROR en caso contrario
+ */
 int detach_shared_memory(SharedMemory* shm) {
     if (!shm) return SUCCESS;
     
@@ -56,6 +86,16 @@ int detach_shared_memory(SharedMemory* shm) {
 /**
  * Obtiene puntero al buffer de CharacterSlot usando el offset almacenado en SHM
  */
+/**
+ * @brief Obtiene puntero al buffer de slots de caracteres
+ * 
+ * Calcula la dirección del buffer de slots usando el offset almacenado
+ * en la memoria compartida. Esto garantiza que el puntero sea válido
+ * en todos los procesos.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @return Puntero al buffer de slots o NULL en caso de error
+ */
 CharacterSlot* get_buffer_pointer(SharedMemory* shm) {
     if (!shm) return NULL;
     return (CharacterSlot*)((char*)shm + shm->buffer_offset);
@@ -63,6 +103,17 @@ CharacterSlot* get_buffer_pointer(SharedMemory* shm) {
 
 /**
  * Lee la información completa de un slot específico
+ */
+/**
+ * @brief Lee la información completa de un slot específico
+ * 
+ * Copia la información completa de un slot del buffer a una estructura
+ * proporcionada por el llamador. Verifica que el índice sea válido.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @param slot_index Índice del slot a leer
+ * @param out Puntero a la estructura donde copiar la información
+ * @return SUCCESS si se leyó correctamente, ERROR en caso contrario
  */
 int get_slot_info(SharedMemory* shm, int slot_index, CharacterSlot* out) {
     if (!shm || !out) return ERROR;

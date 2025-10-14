@@ -8,7 +8,28 @@
 #include "semaphore_init.h"
 #include "constants.h"
 
-/* Apertura (creación) segura: si existen, se des-referencian y recrean. */
+/**
+ * Módulo de Inicialización de Semáforos
+ * 
+ * Este módulo maneja la creación y gestión de los semáforos POSIX nombrados
+ * utilizados para la sincronización del sistema. Los semáforos incluyen:
+ * - Mutex global para acceso a memoria compartida
+ * - Mutex para colas de encriptación y desencriptación
+ * - Semáforos contadores para espacios disponibles e items pendientes
+ */
+
+/**
+ * @brief Crea un semáforo POSIX nombrado de manera segura
+ * 
+ * Si el semáforo ya existe, lo elimina y crea uno nuevo con los
+ * valores especificados. Esta función garantiza un estado limpio
+ * del semáforo.
+ * 
+ * @param name Nombre del semáforo (debe empezar con /)
+ * @param initial_value Valor inicial del semáforo
+ * @param out Puntero donde se almacenará el handle del semáforo
+ * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
+ */
 static int create_named_semaphore(const char* name, unsigned int initial_value, sem_t** out) {
     // Cerramos residuos previos si los hubiera
     sem_unlink(name);
@@ -22,12 +43,31 @@ static int create_named_semaphore(const char* name, unsigned int initial_value, 
     return SUCCESS;
 }
 
-/* Cierre de handle (no elimina el nombre). */
+/**
+ * @brief Cierra el handle de un semáforo
+ * 
+ * Cierra el handle del semáforo pero mantiene el semáforo en el sistema.
+ * No elimina el nombre del semáforo, solo libera recursos del proceso.
+ * 
+ * @param h Handle del semáforo a cerrar
+ */
 static void close_handle(sem_t* h) {
     if (h && h != SEM_FAILED) sem_close(h);
 }
 
-/* Creación e inicialización de todos los semáforos requeridos. */
+/**
+ * @brief Crea e inicializa todos los semáforos del sistema
+ * 
+ * Inicializa los cinco semáforos necesarios para la sincronización:
+ * 1. Mutex global para acceso a memoria compartida
+ * 2. Mutex para cola de encriptación
+ * 3. Mutex para cola de desencriptación
+ * 4. Contador de espacios disponibles (buffer_size inicial)
+ * 5. Contador de items pendientes (0 inicial)
+ * 
+ * @param buffer_size Tamaño del buffer circular
+ * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
+ */
 int initialize_semaphores(int buffer_size) {
     sem_t *g = NULL, *eq = NULL, *dq = NULL, *es = NULL, *di = NULL;
 
@@ -59,7 +99,15 @@ int initialize_semaphores(int buffer_size) {
     return SUCCESS;
 }
 
-/* Elimina los semáforos nombrados del sistema. */
+/**
+ * @brief Elimina todos los semáforos del sistema
+ * 
+ * Elimina los cinco semáforos POSIX nombrados del sistema.
+ * Esta función debe llamarse durante la limpieza final del sistema.
+ * Ignora errores si los semáforos ya no existen.
+ * 
+ * @return SUCCESS si todos los semáforos fueron eliminados, ERROR en caso contrario
+ */
 int cleanup_semaphores(void) {
     int ok = SUCCESS;
     if (sem_unlink(SEM_NAME_GLOBAL_MUTEX)   == -1 && errno != ENOENT) ok = ERROR;
@@ -76,7 +124,16 @@ int cleanup_semaphores(void) {
     return ok;
 }
 
-/* Obtiene (temporalmente) el valor de un semáforo por nombre para imprimir. */
+/**
+ * @brief Lee el valor actual de un semáforo por nombre
+ * 
+ * Abre temporalmente un semáforo, lee su valor actual y lo cierra.
+ * Útil para monitoreo y debugging del estado del sistema.
+ * 
+ * @param name Nombre del semáforo
+ * @param out Puntero donde se almacenará el valor
+ * @return SUCCESS si la lectura fue exitosa, ERROR en caso contrario
+ */
 static int get_value_of(const char* name, int* out) {
     sem_t* h = sem_open(name, 0);
     if (h == SEM_FAILED) return ERROR;
@@ -90,7 +147,13 @@ static int get_value_of(const char* name, int* out) {
     return SUCCESS;
 }
 
-/* Imprime los valores actuales de los semáforos POSIX nombrados. */
+/**
+ * @brief Muestra los valores actuales de todos los semáforos
+ * 
+ * Imprime un reporte del estado actual de todos los semáforos
+ * del sistema, incluyendo sus valores y propósito. Útil para
+ * diagnóstico y monitoreo del sistema.
+ */
 void print_semaphore_values(void) {
     int v;
 
@@ -124,10 +187,15 @@ void print_semaphore_values(void) {
     printf("\n");
 }
 
-/*
- * Desbloqueo masivo útil durante el apagado ordenado:
- *  - Publica 'buffer_size' veces en ENCRYPT_SPACES e igualmente en DECRYPT_ITEMS.
- *  - Con esto se evita que queden procesos bloqueados al momento de finalizar.
+/**
+ * @brief Desbloquea todos los procesos durante el apagado
+ * 
+ * Realiza un "desbloqueo masivo" incrementando los semáforos
+ * de espacios y items buffer_size veces. Esto garantiza que
+ * ningún proceso quede bloqueado indefinidamente durante
+ * el apagado del sistema.
+ * 
+ * @param buffer_size Tamaño del buffer circular
  */
 void wake_all_blocked_processes(int buffer_size) {
     sem_t *es = sem_open(SEM_NAME_ENCRYPT_SPACES, 0);

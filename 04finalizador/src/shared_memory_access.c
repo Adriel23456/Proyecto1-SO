@@ -5,8 +5,24 @@
 #include <time.h>
 #include "shared_memory_access.h"
 
+/* Define la clave para la memoria compartida, debe ser la misma que usa el inicializador */
 #define IPC_KEY 0x1234
 
+/**
+ * Funciones para manejo de memoria compartida y estadísticas del sistema
+ * Este archivo contiene las funciones necesarias para acceder a la memoria compartida
+ * y mostrar las estadísticas de ejecución del sistema.
+ */
+
+/**
+ * @brief Conecta el proceso a la memoria compartida existente
+ * 
+ * Esta función obtiene acceso a la memoria compartida creada por el inicializador.
+ * Utiliza la clave IPC_KEY para identificar el segmento de memoria correcto.
+ * 
+ * @return SharedMemory* Puntero a la estructura de memoria compartida
+ * @exit Termina el programa si hay error al acceder a la memoria
+ */
 SharedMemory* attach_shared_memory() {
     int shm_id = shmget(IPC_KEY, sizeof(SharedMemory), 0666);
     if (shm_id == -1) {
@@ -23,6 +39,15 @@ SharedMemory* attach_shared_memory() {
     return shm;
 }
 
+/**
+ * @brief Desconecta el proceso de la memoria compartida
+ * 
+ * Esta función libera la conexión del proceso con el segmento de memoria compartida.
+ * Debe llamarse antes de finalizar el programa para liberar recursos.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida a desconectar
+ * @exit Termina el programa si hay error al desconectar
+ */
 void detach_shared_memory(SharedMemory* shm) {
     if (shmdt(shm) == -1) {
         perror("shmdt failed");
@@ -30,6 +55,18 @@ void detach_shared_memory(SharedMemory* shm) {
     }
 }
 
+/**
+ * @brief Muestra las estadísticas finales del sistema
+ * 
+ * Esta función presenta un resumen completo de la ejecución del sistema, incluyendo:
+ * - Estadísticas generales (total de caracteres, progreso)
+ * - Estadísticas de cada emisor (PID, caracteres procesados, tiempos)
+ * - Estadísticas de cada receptor (PID, caracteres procesados, tiempos)
+ * 
+ * La información se muestra con formato y colores para mejor legibilidad
+ * 
+ * @param shm Puntero a la estructura de memoria compartida con las estadísticas
+ */
 void print_statistics(SharedMemory* shm) {
     printf("\033[1;36m╔════════════════════════════════════════════════════════════╗\033[0m\n");
     printf("\033[1;36m║                ESTADÍSTICAS DEL SISTEMA                    ║\033[0m\n");

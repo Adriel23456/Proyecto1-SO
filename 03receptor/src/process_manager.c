@@ -1,8 +1,28 @@
+/**
+ * Módulo de Gestión de Procesos Receptores
+ * 
+ * Este módulo maneja el registro y desregistro de procesos receptores
+ * en la memoria compartida, así como el seguimiento de sus estadísticas.
+ * Proporciona funciones para mantener un control centralizado de los
+ * receptores activos y su información relevante.
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include "process_manager.h"
 #include "constants.h"
 
+/**
+ * @brief Registra un nuevo proceso receptor
+ * 
+ * Registra el PID de un nuevo proceso receptor en la memoria compartida
+ * y actualiza los contadores de receptores activos y totales.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @param pid PID del proceso receptor a registrar
+ * @param sem_global Semáforo global para sincronización
+ * @return SUCCESS si se registró correctamente, ERROR en caso contrario
+ */
 int register_receptor(SharedMemory* shm, pid_t pid, sem_t* sem_global) {
     if (!shm || !sem_global) return ERROR;
     sem_wait(sem_global);
@@ -25,6 +45,17 @@ int register_receptor(SharedMemory* shm, pid_t pid, sem_t* sem_global) {
     return ok ? SUCCESS : ERROR;
 }
 
+/**
+ * @brief Elimina el registro de un proceso receptor
+ * 
+ * Elimina el PID de un proceso receptor de la memoria compartida
+ * y actualiza el contador de receptores activos.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @param pid PID del proceso receptor a desregistrar
+ * @param sem_global Semáforo global para sincronización
+ * @return SUCCESS si se desregistró correctamente, ERROR en caso contrario
+ */
 int unregister_receptor(SharedMemory* shm, pid_t pid, sem_t* sem_global) {
     if (!shm || !sem_global) return ERROR;
     sem_wait(sem_global);
@@ -47,7 +78,20 @@ int unregister_receptor(SharedMemory* shm, pid_t pid, sem_t* sem_global) {
     return found ? SUCCESS : ERROR;
 }
 
-// NUEVO: Guardar estadísticas del receptor al finalizar
+/**
+ * @brief Guarda las estadísticas de un receptor al finalizar
+ * 
+ * Almacena en la memoria compartida las estadísticas de ejecución
+ * de un proceso receptor, incluyendo caracteres procesados y tiempos
+ * de inicio y fin.
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @param pid PID del proceso receptor
+ * @param chars_received Número de caracteres procesados por el receptor
+ * @param start_time Tiempo de inicio del proceso
+ * @param end_time Tiempo de finalización del proceso
+ * @param sem_global Semáforo global para sincronización
+ */
 void save_receptor_stats(SharedMemory* shm, pid_t pid, int chars_received,
                         time_t start_time, time_t end_time, sem_t* sem_global) {
     if (!shm || !sem_global) return;

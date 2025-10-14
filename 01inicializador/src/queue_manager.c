@@ -5,9 +5,23 @@
 #include "constants.h"
 #include "structures.h"
 
-/*
- * Acceso al array físico de cada cola mediante su offset en la SHM.
- * Esto evita el uso de punteros no válidos entre procesos.
+/**
+ * Módulo de Gestión de Colas
+ * 
+ * Este módulo implementa dos colas circulares en memoria compartida:
+ * 1. Cola de encriptación: Mantiene índices de slots libres
+ * 2. Cola de desencriptación: Mantiene slots con datos procesados
+ * 
+ * Las colas usan offsets en lugar de punteros para garantizar
+ * consistencia entre procesos en memoria compartida.
+ */
+
+/**
+ * @brief Funciones auxiliares para acceder a los arrays físicos
+ * 
+ * Estas funciones calculan la dirección correcta de los arrays
+ * usando offsets desde el inicio de la memoria compartida,
+ * evitando el uso de punteros que serían inválidos entre procesos.
  */
 static inline SlotRef* enc_array(SharedMemory* shm) {
     return (SlotRef*)((char*)shm + shm->encrypt_queue.array_offset);
@@ -16,10 +30,15 @@ static inline SlotRef* dec_array(SharedMemory* shm) {
     return (SlotRef*)((char*)shm + shm->decrypt_queue.array_offset);
 }
 
-/*
- * Inicialización de colas:
- *  - encrypt: se llena con todos los índices [0..buffer_size-1].
- *  - decrypt: queda vacía.
+/**
+ * @brief Inicializa ambas colas del sistema
+ * 
+ * Configura las colas de encriptación y desencriptación:
+ * - Cola de encriptación: Se llena con todos los índices disponibles [0..buffer_size-1]
+ * - Cola de desencriptación: Se inicializa vacía
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @param buffer_size Tamaño del buffer circular
  */
 void initialize_queues(SharedMemory* shm, int buffer_size) {
     initialize_encrypt_queue(shm, buffer_size);
@@ -66,8 +85,15 @@ void initialize_decrypt_queue(SharedMemory* shm) {
     printf("  • Cola de desencriptación inicializada (vacía)\n");
 }
 
-/*
- * Enqueue de slot libre en encrypt.
+/**
+ * @brief Agrega un slot libre a la cola de encriptación
+ * 
+ * Inserta un nuevo slot disponible en la cola de encriptación.
+ * Esta operación se usa cuando un slot se libera después de ser procesado.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @param slot_index Índice del slot a encolar
+ * @return SUCCESS si la operación fue exitosa, ERROR si la cola está llena
  */
 int enqueue_encrypt_slot(SharedMemory* shm, int slot_index) {
     Queue* q = &shm->encrypt_queue;
@@ -80,8 +106,15 @@ int enqueue_encrypt_slot(SharedMemory* shm, int slot_index) {
     return SUCCESS;
 }
 
-/*
- * Dequeue de slot libre en encrypt.
+/**
+ * @brief Obtiene un slot libre de la cola de encriptación
+ * 
+ * Retira y retorna el siguiente slot disponible de la cola
+ * de encriptación. Los emisores usan esta función para obtener
+ * slots donde escribir nuevos datos.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @return Índice del slot obtenido, -1 si la cola está vacía
  */
 int dequeue_encrypt_slot(SharedMemory* shm) {
     Queue* q = &shm->encrypt_queue;
@@ -93,8 +126,16 @@ int dequeue_encrypt_slot(SharedMemory* shm) {
     return slot_index;
 }
 
-/*
- * Enqueue de elemento con datos en decrypt.
+/**
+ * @brief Agrega un slot con datos a la cola de desencriptación
+ * 
+ * Inserta un slot que contiene datos encriptados en la cola
+ * de desencriptación para que sea procesado por los receptores.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @param slot_index Índice del slot con datos
+ * @param text_index Posición del carácter en el texto original
+ * @return SUCCESS si la operación fue exitosa, ERROR si la cola está llena
  */
 int enqueue_decrypt_slot(SharedMemory* shm, int slot_index, int text_index) {
     Queue* q = &shm->decrypt_queue;
@@ -107,8 +148,14 @@ int enqueue_decrypt_slot(SharedMemory* shm, int slot_index, int text_index) {
     return SUCCESS;
 }
 
-/*
- * Dequeue FIFO en decrypt.
+/**
+ * @brief Obtiene el siguiente slot con datos de la cola de desencriptación
+ * 
+ * Retira y retorna el siguiente slot con datos encriptados
+ * siguiendo una política FIFO (First In, First Out).
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @return Estructura SlotInfo con los índices del slot y texto, -1 en ambos si la cola está vacía
  */
 SlotInfo dequeue_decrypt_slot(SharedMemory* shm) {
     SlotInfo info = { .slot_index = -1, .text_index = -1 };
@@ -122,9 +169,16 @@ SlotInfo dequeue_decrypt_slot(SharedMemory* shm) {
     return info;
 }
 
-/*
- * Dequeue ordenado por menor text_index en decrypt.
- * Complejidad O(n) sobre el tamaño actual de la cola.
+/**
+ * @brief Obtiene el slot con el menor text_index de la cola de desencriptación
+ * 
+ * Busca y retorna el slot que contiene el carácter con la menor
+ * posición en el texto original. Esto permite mantener el orden
+ * del texto al desencriptar. Complejidad O(n) donde n es el tamaño
+ * actual de la cola.
+ * 
+ * @param shm Puntero a la estructura de memoria compartida
+ * @return Estructura SlotInfo con los índices del slot y texto, -1 en ambos si la cola está vacía
  */
 SlotInfo dequeue_decrypt_slot_ordered(SharedMemory* shm) {
     SlotInfo info = { .slot_index = -1, .text_index = -1 };

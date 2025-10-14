@@ -1,6 +1,26 @@
-// main.c - Proceso Receptor
-// Lee caracteres encriptados de memoria compartida, los desencripta y escribe a archivo
-// Múltiples receptores pueden ejecutarse en paralelo procesando el mismo stream
+/**
+ * @file main.c
+ * @brief Proceso Receptor del Sistema de Comunicación entre Procesos
+ * 
+ * Este programa implementa la funcionalidad del proceso receptor, que:
+ * 1. Se conecta a la memoria compartida creada por el inicializador
+ * 2. Lee caracteres encriptados de la cola de desencriptación
+ * 3. Desencripta los caracteres usando una clave XOR
+ * 4. Escribe los caracteres desencriptados a un archivo de salida
+ * 
+ * Características principales:
+ * - Soporta múltiples receptores ejecutándose en paralelo
+ * - Mantiene el orden secuencial del texto original
+ * - Modo automático con delay configurable o modo manual paso a paso
+ * - Manejo de señales para finalización elegante
+ * - Soporte para claves de encriptación personalizadas
+ * - Estadísticas detalladas de procesamiento
+ * 
+ * Sincronización:
+ * - Semáforos para protección de secciones críticas
+ * - Cola circular para slots de caracteres
+ * - Escritura atómica al archivo de salida
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +64,15 @@ static sem_t* g_sem_decrypt_items = NULL;
  * Manejador de señales para finalización elegante
  * Captura: SIGINT (Ctrl+C), SIGTERM, SIGUSR1
  */
+/**
+ * @brief Manejador de señales para finalización elegante
+ * 
+ * Este manejador es llamado cuando el proceso recibe SIGINT (Ctrl+C),
+ * SIGTERM o SIGUSR1. Establece una bandera atómica que indica al bucle
+ * principal que debe terminar de manera ordenada.
+ * 
+ * @param sig Número de señal recibida (no usado)
+ */
 static void on_signal(int sig) {
     (void)sig;
     should_terminate = 1;  // Bandera atómica para salir del bucle principal
@@ -53,13 +82,29 @@ static void on_signal(int sig) {
 // FUNCIONES AUXILIARES
 // =============================================================================
 
-/** Sleep en milisegundos (modo automático) */
+/**
+ * @brief Suspende la ejecución por un número de milisegundos
+ * 
+ * Utilizada en modo automático para controlar la velocidad de
+ * procesamiento de caracteres.
+ * 
+ * @param ms Milisegundos a esperar (debe ser positivo)
+ */
 static void sleep_ms(int ms) {
     if (ms <= 0) return;
     usleep((useconds_t)ms * 1000);
 }
 
-/** Parsea modo de ejecución: "auto" o "manual" */
+/**
+ * @brief Parsea el modo de ejecución del receptor
+ * 
+ * Convierte una cadena en el modo de ejecución correspondiente.
+ * Modos válidos: "auto" para procesamiento automático con delay,
+ * "manual" para procesamiento paso a paso con interacción del usuario.
+ * 
+ * @param s String a parsear ("auto" o "manual")
+ * @return MODE_AUTO, MODE_MANUAL o -1 si es inválido
+ */
 static int parse_mode(const char* s) {
     if (!s) return -1;
     if (strcmp(s, "auto") == 0)   return MODE_AUTO;
@@ -67,7 +112,16 @@ static int parse_mode(const char* s) {
     return -1;
 }
 
-/** Parsea clave de encriptación hexadecimal (2 caracteres) */
+/**
+ * @brief Parsea la clave de encriptación hexadecimal
+ * 
+ * Convierte una cadena hexadecimal de 2 caracteres en un byte
+ * que se usará como clave de encriptación/desencriptación XOR.
+ * 
+ * @param s String hexadecimal de 2 caracteres
+ * @param has_custom Puntero donde almacenar si se proporcionó una clave válida
+ * @return Valor de la clave (0 si es inválida)
+ */
 static unsigned char parse_key_opt(const char* s, int* has_custom) {
     *has_custom = 0;
     if (!s) return 0;
@@ -81,7 +135,16 @@ static unsigned char parse_key_opt(const char* s, int* has_custom) {
     return 0;
 }
 
-/** Formatea timestamp para display */
+/**
+ * @brief Formatea un timestamp UNIX para display
+ * 
+ * Convierte un timestamp UNIX en una cadena de hora legible
+ * en formato HH:MM:SS usando la zona horaria local.
+ * 
+ * @param t Timestamp UNIX a formatear
+ * @param buf Buffer donde escribir el resultado
+ * @param n Tamaño del buffer (debe ser >= 20)
+ */
 static void pretty_time(time_t t, char* buf, size_t n) {
     if (!buf || n < 20) return;
     struct tm* tm = localtime(&t);
@@ -96,7 +159,12 @@ static void pretty_time(time_t t, char* buf, size_t n) {
 // DISPLAY
 // =============================================================================
 
-/** Banner inicial del receptor */
+/**
+ * @brief Muestra el banner inicial del receptor
+ * 
+ * Imprime un banner estilizado que identifica el programa
+ * y su propósito en el sistema de comunicación.
+ */
 static void print_banner(void) {
     printf(BOLD GREEN "╔══════════════════════════════════════════════════════════╗\n" RESET);
     printf(BOLD GREEN "║                        RECEPTOR                          ║\n" RESET);
@@ -105,7 +173,19 @@ static void print_banner(void) {
     printf("\n");
 }
 
-/** Muestra información detallada del carácter recibido */
+/**
+ * @brief Muestra información detallada del carácter recibido
+ * 
+ * Imprime un cuadro informativo que muestra:
+ * - PID del receptor
+ * - Índice del carácter en el texto original
+ * - Slot de memoria usado
+ * - Valor encriptado y desencriptado del carácter
+ * - Timestamp de inserción y PID del emisor
+ * - Estado actual de las colas
+ * 
+ * @param shm Puntero a la memoria compartida
+ */
 static void print_reception_box(SharedMemory* shm,
                                 int slot_index,
                                 int text_index,

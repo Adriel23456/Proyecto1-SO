@@ -5,10 +5,41 @@
 #include "display.h"
 #include "constants.h"
 
+/**
+ * Módulo de Visualización del Emisor
+ * 
+ * Este módulo maneja la presentación visual de la información
+ * del emisor, incluyendo el estado de la emisión de caracteres
+ * y estadísticas del sistema. Proporciona una interfaz visual
+ * amigable con colores y formatos.
+ */
+
+/**
+ * @brief Verifica si un carácter es imprimible
+ * 
+ * Determina si un carácter es visible y seguro para mostrar
+ * directamente en la terminal.
+ * 
+ * @param c Carácter a verificar
+ * @return 1 si el carácter es imprimible, 0 en caso contrario
+ */
 static int is_printable_char(char c) {
     return (c >= 32 && c < 127);
 }
 
+/**
+ * @brief Genera una representación segura de un carácter para mostrar
+ * 
+ * Convierte cualquier carácter (incluyendo caracteres especiales y de control)
+ * en una representación segura para mostrar en la terminal. Por ejemplo:
+ * - Caracteres imprimibles: se muestran tal cual
+ * - Saltos de línea: \n
+ * - Caracteres de control: \xHH (donde HH es el valor hexadecimal)
+ * 
+ * @param c Carácter a convertir
+ * @param buffer Buffer donde se escribirá la representación
+ * @param size Tamaño del buffer
+ */
 static void get_safe_char_display(char c, char* buffer, size_t size) {
     if (buffer == NULL || size < 5) return;
     
@@ -20,6 +51,13 @@ static void get_safe_char_display(char c, char* buffer, size_t size) {
     else snprintf(buffer, size, "\\x%02X", (unsigned char)c);
 }
 
+/**
+ * @brief Muestra el banner inicial del emisor
+ * 
+ * Imprime un encabezado decorativo que identifica al proceso
+ * emisor. Usa colores y caracteres Unicode para crear un
+ * marco visual atractivo.
+ */
 void print_emisor_banner() {
     printf(BOLD GREEN "╔══════════════════════════════════════════════════════════╗\n" RESET);
     printf(BOLD GREEN "║                       EMISOR                            ║\n" RESET);
@@ -28,6 +66,24 @@ void print_emisor_banner() {
     printf("\n");
 }
 
+/**
+ * @brief Muestra el estado de la emisión de un carácter
+ * 
+ * Imprime un cuadro informativo detallado sobre el carácter
+ * que se está procesando, incluyendo:
+ * - PID del emisor
+ * - Índice en el texto original
+ * - Slot de memoria usado
+ * - Carácter original y su versión encriptada
+ * - Timestamp de la operación
+ * - Estado de las colas
+ * 
+ * @param shm Puntero a la memoria compartida
+ * @param slot_index Índice del slot usado
+ * @param original Carácter original
+ * @param encrypted Carácter encriptado
+ * @param text_index Posición en el texto original
+ */
 void print_emission_status(SharedMemory* shm, int slot_index, char original, 
                            unsigned char encrypted, int text_index) {
     if (shm == NULL) return;
