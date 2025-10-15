@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-// Abre/crea el archivo de salida en ./out/<basename>.dec.bin
+// Abre/crea el archivo de salida en ./out/<basename>.dec.txt
 // - Si RECEPTOR_OUT_DIR está definido, usa ese directorio.
 // - Pre-dimensiona el archivo a file_size (ftruncate) para escritura aleatoria.
 // - Devuelve el fd o -1 en error. out_path se llena con la ruta final usada.

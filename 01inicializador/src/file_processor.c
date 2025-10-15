@@ -13,16 +13,16 @@
  * 
  * Este módulo se encarga de manejar todas las operaciones relacionadas con
  * el archivo de entrada, incluyendo su lectura, procesamiento y validación.
- * También genera un archivo binario para inspección y proporciona funciones
- * de utilidad para acceder a los datos en memoria compartida.
+ * También proporciona funciones de utilidad para acceder a los datos en
+ * memoria compartida.
  */
 
 /**
- * @brief Procesa el archivo de entrada y genera una versión binaria
+ * @brief Procesa el archivo de entrada
  * 
  * Lee el archivo completo en memoria, realiza validaciones de tamaño
- * y contenido, genera un archivo .bin para inspección y retorna el
- * buffer con los datos leídos.
+ * y contenido, imprime estadísticas básicas y retorna el buffer con
+ * los datos leídos.
  * 
  * @param filename Nombre del archivo a procesar
  * @param file_size Puntero donde se almacenará el tamaño del archivo
@@ -73,47 +73,9 @@ unsigned char* process_input_file(const char* filename, size_t* file_size) {
     }
     fclose(input_file);
 
-    char bin_filename[512];
-    snprintf(bin_filename, sizeof(bin_filename), "%s.bin", filename);
-    if (write_binary_file(bin_filename, data, size) == ERROR) {
-        free(data);
-        return NULL;
-    }
-
     print_file_statistics(data, size);
     *file_size = size;
     return data;
-}
-
-/**
- * @brief Escribe los datos en un archivo binario
- * 
- * Crea un archivo binario con los datos proporcionados y establece
- * los permisos adecuados (0666) para que otros procesos puedan leerlo.
- * 
- * @param filename Nombre del archivo a crear
- * @param data Buffer con los datos a escribir
- * @param size Tamaño de los datos
- * @return SUCCESS si la operación fue exitosa, ERROR en caso contrario
- */
-int write_binary_file(const char* filename, const unsigned char* data, size_t size) {
-    FILE* bin_file = fopen(filename, "wb");
-    if (bin_file == NULL) {
-        fprintf(stderr, RED "[ERROR] No se pudo crear '%s': %s\n" RESET, filename, strerror(errno));
-        return ERROR;
-    }
-
-    size_t bytes_written = fwrite(data, 1, size, bin_file);
-    if (bytes_written != size) {
-        fprintf(stderr, RED "[ERROR] Escritura incompleta: %zu de %zu bytes\n" RESET,
-                bytes_written, size);
-        fclose(bin_file);
-        return ERROR;
-    }
-    fclose(bin_file);
-
-    chmod(filename, 0666);
-    return SUCCESS;
 }
 
 /**

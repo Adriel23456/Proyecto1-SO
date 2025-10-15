@@ -44,19 +44,54 @@ void setup_signal_handlers() {
     sigaction(SIGUSR1, &sa, NULL);
 }
 
+static void print_usage(const char* argv0) {
+    fprintf(stderr, "Uso:\n");
+    fprintf(stderr, "  %s                      # auto, clave SHM, delay=0\n", argv0);
+    fprintf(stderr, "  %s auto                # auto, clave SHM, delay=0\n", argv0);
+    fprintf(stderr, "  %s manual              # manual, clave SHM\n", argv0);
+    fprintf(stderr, "  %s auto <KEY>          # auto, clave=<KEY>, delay=0 (KEY=2 hex)\n", argv0);
+    fprintf(stderr, "  %s manual <KEY>        # manual, clave=<KEY>\n", argv0);
+    fprintf(stderr, "  %s auto <KEY> <MS>     # auto, clave=<KEY>, delay=<MS>\n", argv0);
+    fprintf(stderr, "  %s auto <MS>           # auto, clave SHM, delay=<MS>\n", argv0);
+    fprintf(stderr, "Notas:\n");
+    fprintf(stderr, "  - <KEY> es 2 hex (ej: AA, ff)\n");
+    fprintf(stderr, "  - <MS> es delay en milisegundos (0..%d)\n", MAX_DELAY_MS);
+}
+
 int validate_arguments(int argc, char* argv[]) {
-    if (argc < 2 || argc > 4) {
-        fprintf(stderr, RED "[ERROR] Argumentos incorrectos\n" RESET);
-        fprintf(stderr, "Uso: %s <auto|manual> [clave_hex] [delay_ms]\n", argv[0]);
+    // Ahora permitimos de 1 a 4 argumentos totales (argv[0] + 0..3 adicionales)
+    if (argc < 1 || argc > 4) {
+        print_usage(argv[0]);
         return ERROR;
     }
     return SUCCESS;
 }
 
 int parse_mode(const char* mode_str) {
+    if (!mode_str) return MODE_AUTO; // por defecto: auto
     if (strcmp(mode_str, "auto") == 0) return MODE_AUTO;
     if (strcmp(mode_str, "manual") == 0) return MODE_MANUAL;
     return ERROR;
+}
+
+static int is_two_hex_chars(const char* s, unsigned char* out_key) {
+    if (!s || strlen(s) != 2) return 0;
+    unsigned char k = 0;
+    if (sscanf(s, "%2hhx", &k) == 1) {
+        if (out_key) *out_key = k;
+        return 1;
+    }
+    return 0;
+}
+
+static int parse_nonneg_int(const char* s, int* out) {
+    if (!s || !*s) return 0;
+    char* end = NULL;
+    long v = strtol(s, &end, 10);
+    if (*end != '\0') return 0;
+    if (v < 0 || v > MAX_DELAY_MS) return 0;
+    if (out) *out = (int)v;
+    return 1;
 }
 
 unsigned char parse_encryption_key(const char* key_str) {
@@ -69,25 +104,100 @@ unsigned char parse_encryption_key(const char* key_str) {
 int main(int argc, char* argv[]) {
     if (validate_arguments(argc, argv) == ERROR) return EXIT_FAILURE;
     
-    int mode = parse_mode(argv[1]);
-    if (mode == ERROR) {
-        fprintf(stderr, RED "[ERROR] Modo inválido\n" RESET);
-        return EXIT_FAILURE;
-    }
-    
+    // -------------------------------
+    // Parsing flexible de argumentos
+    // -------------------------------
+    // Casos soportados:
+    //   1) (sin args)                  -> auto,   key=SHM, delay=0
+    //   2) auto                        -> auto,   key=SHM, delay=0
+    //   3) manual                      -> manual, key=SHM
+    //   4) auto <KEY>                  -> auto,   key=<KEY>, delay=0
+    //   5) manual <KEY>                -> manual, key=<KEY>
+    //   6) auto <KEY> <MS>             -> auto,   key=<KEY>, delay=<MS>
+    //   7) auto <MS>                   -> auto,   key=SHM,   delay=<MS>
+
+    int mode = MODE_AUTO;
     unsigned char custom_key = 0;
     int has_custom_key = 0;
-    if (argc >= 3) {
-        custom_key = parse_encryption_key(argv[2]);
-        has_custom_key = 1;
+    int delay_ms = DEFAULT_DELAY_MS;  // por defecto: 0 (sin slowdown)
+
+    if (argc == 1) {
+        // ./emisor
+        mode = MODE_AUTO;
+        has_custom_key = 0;
+        delay_ms = 0;
+    } else {
+        // hay al menos un argumento de modo
+        mode = parse_mode(argv[1]);
+        if (mode == ERROR) {
+            fprintf(stderr, RED "[ERROR] Modo inválido. Use 'auto' o 'manual'\n" RESET);
+            print_usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+
+        if (argc == 2) {
+            // ./emisor auto  |  ./emisor manual
+            has_custom_key = 0;
+            delay_ms = (mode == MODE_AUTO) ? 0 : 0; // manual ignora delay
+        } else if (argc == 3) {
+            // ./emisor auto X   (X puede ser KEY o MS)
+            // ./emisor manual KEY
+            if (mode == MODE_AUTO) {
+                unsigned char k = 0;
+                if (is_two_hex_chars(argv[2], &k)) {
+                    custom_key = k;
+                    has_custom_key = 1;
+                    delay_ms = 0; // auto con KEY pero sin MS -> sin slowdown
+                } else {
+                    // Si no es KEY válido, intentamos MS (delay)
+                    int d = 0;
+                    if (!parse_nonneg_int(argv[2], &d)) {
+                        fprintf(stderr, RED "[ERROR] Argumento inválido '%s'. Espere <KEY(hex2)> o <MS>\n" RESET, argv[2]);
+                        print_usage(argv[0]);
+                        return EXIT_FAILURE;
+                    }
+                    has_custom_key = 0; // clave desde SHM
+                    delay_ms = d;       // auto con delay explícito
+                }
+            } else { // MODE_MANUAL
+                unsigned char k = 0;
+                if (!is_two_hex_chars(argv[2], &k)) {
+                    fprintf(stderr, RED "[ERROR] Clave inválida para modo manual. Use 2 hex (ej: AA)\n" RESET);
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                custom_key = k;
+                has_custom_key = 1;
+                delay_ms = 0; // en manual no aplica slowdown
+            }
+        } else { // argc == 4
+            // ./emisor auto KEY MS
+            // ./emisor manual KEY (MS ignorado)
+            if (mode == MODE_AUTO) {
+                unsigned char k = 0;
+                int d = 0;
+                if (!is_two_hex_chars(argv[2], &k) || !parse_nonneg_int(argv[3], &d)) {
+                    fprintf(stderr, RED "[ERROR] Use: auto <KEY(hex2)> <MS>\n" RESET);
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                custom_key = k;
+                has_custom_key = 1;
+                delay_ms = d;
+            } else { // manual con KEY y un tercer arg que ignoramos
+                unsigned char k = 0;
+                if (!is_two_hex_chars(argv[2], &k)) {
+                    fprintf(stderr, RED "[ERROR] Clave inválida para modo manual. Use 2 hex (ej: AA)\n" RESET);
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                custom_key = k;
+                has_custom_key = 1;
+                delay_ms = 0; // manual ignora slowdown
+            }
+        }
     }
-    
-    int delay_ms = DEFAULT_DELAY_MS;
-    if (argc >= 4 && mode == MODE_AUTO) {
-        delay_ms = atoi(argv[3]);
-        if (delay_ms < MIN_DELAY_MS || delay_ms > MAX_DELAY_MS) delay_ms = DEFAULT_DELAY_MS;
-    }
-    
+
     setup_signal_handlers();
     print_emisor_banner();
     
@@ -176,6 +286,11 @@ int main(int argc, char* argv[]) {
 
         print_emission_status(shm, slot_index, original_char, encrypted, txt_index);
         chars_sent++;
+
+        // --- NUEVO: aplicar slowdown sólo en modo AUTO y sólo si delay_ms > 0 ---
+        if (mode == MODE_AUTO && delay_ms > 0) {
+            usleep((useconds_t)delay_ms * 1000);
+        }
 
         if (mode == MODE_MANUAL) {
             printf(CYAN "\nPresione ENTER..." RESET);

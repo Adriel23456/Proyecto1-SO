@@ -34,8 +34,10 @@
 #define ERROR   -1
 
 // Delays para modo automático
-#define DEFAULT_DELAY_MS 100
-#define MIN_DELAY_MS     10
+// Cambios: DEFAULT_DELAY_MS = 0 (máxima velocidad por omisión)
+//          MIN_DELAY_MS = 0 (permitir desactivar slowdown explícitamente)
+#define DEFAULT_DELAY_MS 0
+#define MIN_DELAY_MS     0
 #define MAX_DELAY_MS     5000
 
 // Macros útiles

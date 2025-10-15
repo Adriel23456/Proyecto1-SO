@@ -1,166 +1,139 @@
 #include "output_file.h"
 
-/**
- * Módulo de Manejo de Archivos de Salida
- * 
- * Este módulo se encarga de gestionar los archivos de salida donde
- * se escriben los datos desencriptados. Maneja la creación de directorios,
- * apertura de archivos y escritura segura de datos en posiciones
- * específicas del archivo.
- */
-
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <limits.h>
 #include <stdlib.h>
 
+#include "constants.h"
+
 /**
- * @brief Asegura que un directorio existe
+ * Implementación de utilidades de archivo de salida para el Receptor
  * 
- * Verifica si un directorio existe y si no, intenta crearlo.
- * También verifica que la ruta sea realmente un directorio.
- * 
- * @param dir Ruta del directorio a verificar/crear
- * @return 0 si el directorio existe o fue creado, -1 en caso de error
+ * Cambios clave:
+ * - El archivo generado ahora es texto: <basename>.dec.txt
+ * - Se mantiene escritura posicional con pwrite() para soportar
+ *   múltiples receptores escribiendo de forma asíncrona.
+ * - Se "modifica la metadata" del archivo con ftruncate()/posix_fallocate()
+ *   para reservar el tamaño total (inserciones por offset válidas).
  */
-static int ensure_dir(const char* dir) {
-    struct stat st;
-    if (stat(dir, &st) == 0) {
-        if (S_ISDIR(st.st_mode)) return 0;
-        errno = ENOTDIR;
-        return -1;
-    }
-    return mkdir(dir, 0777);
+
+/**
+ * @brief Obtiene el nombre base (basename) de una ruta
+ * 
+ * No usa basename(3) para evitar modificar el buffer original o
+ * dependencias de comportamiento. Copia la porción después del
+ * último '/' a 'dst'.
+ * 
+ * @param path Ruta de entrada (no modificada)
+ * @param dst  Buffer de salida
+ * @param n    Tamaño de 'dst'
+ * @return 0 en éxito, -1 en error
+ */
+static int path_basename(const char* path, char* dst, size_t n) {
+    if (!path || !dst || n == 0) return -1;
+    const char* p = strrchr(path, '/');
+    const char* base = p ? (p + 1) : path;
+    if (strlen(base) + 1 > n) return -1;
+    strncpy(dst, base, n);
+    dst[n - 1] = '\0';
+    return 0;
 }
 
 /**
- * @brief Versión segura de basename que no modifica el input
- * 
- * Extrae el nombre de archivo de una ruta sin modificar la cadena original.
- * Si la ruta está vacía o es solo "/", usa "output" como valor predeterminado.
- * 
- * @param path Ruta de la cual extraer el nombre de archivo
- * @param out Buffer donde se almacenará el resultado
- * @param outsz Tamaño del buffer de salida
+ * @brief Concatena ruta con seguridad de tamaño
  */
-static void safe_basename(const char* path, char* out, size_t outsz) {
-    if (!path || !out || outsz == 0) return;
-    
-    // Encontrar la última barra
-    const char* last_slash = strrchr(path, '/');
-    const char* name = last_slash ? (last_slash + 1) : path;
-    
-    // Si está vacío o es solo "/", usar "output"
-    if (!name[0]) {
-        strncpy(out, "output", outsz - 1);
-        out[outsz - 1] = '\0';
-        return;
-    }
-    
-    strncpy(out, name, outsz - 1);
-    out[outsz - 1] = '\0';
+static int join_path(const char* dir, const char* name, char* out, size_t out_sz) {
+    if (!dir || !name || !out || out_sz == 0) return -1;
+    size_t dlen = strlen(dir);
+    int need_slash = (dlen > 0 && dir[dlen - 1] != '/');
+    int written = snprintf(out, out_sz, "%s%s%s", dir, need_slash ? "/" : "", name);
+    return (written > 0 && (size_t)written < out_sz) ? 0 : -1;
 }
 
 /**
- * @brief Abre o crea un archivo de salida para escribir datos desencriptados
- * 
- * Crea un archivo de salida basado en el nombre del archivo de entrada.
- * El archivo se crea en el directorio especificado por la variable de entorno
- * RECEPTOR_OUT_DIR, o en ./out si no está definida. Si no se puede crear
- * en la ubicación preferida, intenta crear en el directorio actual.
- * 
- * @param shm_input_filename Nombre del archivo de entrada (desde memoria compartida)
- * @param file_size Tamaño esperado del archivo (para pre-dimensionar)
- * @param out_path Buffer donde se almacenará la ruta del archivo creado
- * @param out_path_sz Tamaño del buffer out_path
- * @return Descriptor del archivo abierto, o -1 en caso de error
+ * @brief Asegura que el directorio exista (mkdir -p básico)
  */
+static void ensure_dir_exists(const char* dir) {
+    if (!dir || !*dir) return;
+    // Intentar crear; si ya existe no es error
+    mkdir(dir, 0777);
+}
+
+/**
+ * @brief Construye la ruta final de salida: <OUTDIR>/<basename>.dec.txt
+ */
+static int build_output_path(const char* shm_input_filename, char* out_path, size_t out_path_sz) {
+    char base[NAME_MAX];
+    if (path_basename(shm_input_filename, base, sizeof base) != 0) return -1;
+
+    // Armamos "<basename>.txt"
+    char fname[NAME_MAX];
+    int w = snprintf(fname, sizeof fname, "%s.txt", base);
+    if (w <= 0 || (size_t)w >= sizeof fname) return -1;
+
+    // Directorio
+    const char* outdir = getenv("RECEPTOR_OUT_DIR");
+    if (!outdir || !*outdir) outdir = "./out";
+    ensure_dir_exists(outdir);
+
+    return join_path(outdir, fname, out_path, out_path_sz);
+}
+
 int open_output_file(const char* shm_input_filename,
                      int file_size,
                      char* out_path,
-                     size_t out_path_sz) {
-    if (!shm_input_filename || !out_path || out_path_sz < 8) {
-        errno = EINVAL; return -1;
+                     size_t out_path_sz)
+{
+    if (!shm_input_filename || file_size < 0 || !out_path || out_path_sz == 0) {
+        errno = EINVAL;
+        return -1;
     }
 
-    // Directorio de salida configurable por variable de entorno
-    const char* dir = getenv("RECEPTOR_OUT_DIR");
-    if (!dir || !*dir) dir = "./out";
-
-    if (ensure_dir(dir) == -1 && errno != EEXIST) {
-        // si falló crear ./out (o RECEPTOR_OUT_DIR), usamos el cwd como fallback
-        dir = ".";
-    }
-
-    char base[PATH_MAX + 1];
-    safe_basename(shm_input_filename, base, sizeof(base));
-    
-    // Si no hay basename válido, usar "output"
-    if (!base[0]) {
-        strncpy(base, "output", sizeof(base) - 1);
-        base[sizeof(base) - 1] = '\0';
-    }
-
-    // Ruta final preferida: <dir>/<basename>.dec.bin
-    int need = snprintf(out_path, out_path_sz, "%s/%s.dec.bin", dir, base);
-    if (need < 0 || (size_t)need >= out_path_sz) {
+    if (build_output_path(shm_input_filename, out_path, out_path_sz) != 0) {
         errno = ENAMETOOLONG;
         return -1;
     }
 
     int fd = open(out_path, O_CREAT | O_RDWR, 0666);
     if (fd == -1) {
-        // último fallback: ./<basename>.dec.bin
-        need = snprintf(out_path, out_path_sz, "./%s.dec.bin", base);
-        if (need < 0 || (size_t)need >= out_path_sz) {
-            errno = ENAMETOOLONG; return -1;
-        }
-        fd = open(out_path, O_CREAT | O_RDWR, 0666);
-        if (fd == -1) return -1;
+        // Mensaje amigable; el caller imprimirá strerror(errno)
+        return -1;
     }
 
-    // Pre-dimensionar para permitir escrituras aleatorias con pwrite
-    if (file_size > 0) {
-        if (ftruncate(fd, file_size) == -1) {
-            // No es fatal: seguimos, pero dejamos el aviso
-            fprintf(stderr, "WARN: ftruncate('%s', %d) falló: %s\n",
-                    out_path, file_size, strerror(errno));
-        }
+    // --- Modificación de metadata para soportar inyecciones posicionales ---
+    // Pre-dimensionar: garantiza que los offsets [0..file_size-1] existan.
+    if (ftruncate(fd, (off_t)file_size) == -1) {
+        // Si falla, seguimos, pero las escrituras podrían crear huecos
+        // (sparse file). No se considera fatal para funcionalidad.
     }
+
+    // Si está disponible, intentar reservar físicamente el espacio.
+    // Esto evita sorpresas con huecos en sistemas que lo soportan.
+#if defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE >= 200112L)
+    // posix_fallocate devuelve 0 en éxito y un código de error POSIX si falla.
+    // No tratamos la falla como fatal; pwrite seguirá funcionando.
+    (void)posix_fallocate(fd, 0, (off_t)file_size);
+#endif
+
     return fd;
 }
 
-/**
- * @brief Escribe un carácter desencriptado en una posición específica del archivo
- * 
- * Utiliza pwrite para escribir un carácter en una posición específica del archivo
- * sin modificar el puntero de lectura/escritura del archivo.
- * 
- * @param fd Descriptor del archivo donde escribir
- * @param index Posición donde escribir el carácter
- * @param ch Carácter a escribir
- * @return 0 en caso de éxito, -1 en caso de error
- */
 int write_decoded_char(int fd, int index, unsigned char ch) {
-    if (fd < 0 || index < 0) { errno = EINVAL; return -1; }
-    ssize_t w = pwrite(fd, &ch, 1, (off_t)index);
-    return (w == 1) ? 0 : -1;
+    if (fd < 0 || index < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    ssize_t n = pwrite(fd, &ch, 1, (off_t)index);
+    if (n != 1) return -1;
+    return 0;
 }
 
-/**
- * @brief Cierra un archivo de salida
- * 
- * Cierra el descriptor de archivo proporcionado si es válido.
- * 
- * @param fd Descriptor del archivo a cerrar
- * @return 0 en caso de éxito, -1 en caso de error
- */
 int close_output_file(int fd) {
-    if (fd >= 0) return close(fd);
-    return 0;
+    if (fd < 0) return 0;
+    return close(fd);
 }

@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
     for (int i = 7; i >= 0; i--) printf("%d", (encryption_key >> i) & 1);
     printf(")\n\n");
 
-    // Paso 1: leer archivo y generar .bin
+    // Paso 1: leer archivo de entrada
     printf(YELLOW "[PASO 1] Procesando archivo de entrada...\n" RESET);
     size_t file_size = 0;
     unsigned char* file_data = process_input_file(input_filename, &file_size);
@@ -90,7 +90,6 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     printf(GREEN "  ✓ Archivo procesado: %zu bytes leídos\n" RESET, file_size);
-    printf(GREEN "  ✓ Archivo binario generado: %s.bin\n" RESET, input_filename);
 
     if (file_size > (size_t)INT_MAX) {
         fprintf(stderr, RED "[ERROR] Archivo demasiado grande para parámetros actuales (%zu bytes)\n" RESET, file_size);

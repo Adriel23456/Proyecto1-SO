@@ -6,12 +6,10 @@
 
 /*
  * Procesamiento de archivos:
- *  - process_input_file: lee el archivo de entrada completo, genera .bin y retorna buffer.
- *  - write_binary_file: escribe el bloque binario a disco con permisos 0666.
+ *  - process_input_file: lee el archivo de entrada completo en memoria y retorna buffer.
  *  - print_file_statistics: imprime métricas básicas del contenido.
  */
 unsigned char* process_input_file(const char* filename, size_t* file_size);
-int  write_binary_file(const char* filename, const unsigned char* data, size_t size);
 void print_file_statistics(const unsigned char* data, size_t size);
 
 /*

@@ -57,13 +57,6 @@ static sem_t* g_sem_encrypt_spaces= NULL;
 static sem_t* g_sem_decrypt_items = NULL;
 
 // =============================================================================
-// MANEJADORES DE SEÑALES
-// =============================================================================
-
-/**
- * Manejador de señales para finalización elegante
- * Captura: SIGINT (Ctrl+C), SIGTERM, SIGUSR1
- */
 /**
  * @brief Manejador de señales para finalización elegante
  * 
@@ -93,14 +86,14 @@ static void on_signal(int sig) {
  * @return MODE_AUTO, MODE_MANUAL o -1 si es inválido
  */
 static int parse_mode(const char* s) {
-    if (!s) return -1;
+    if (!s) return MODE_AUTO; // por defecto, auto (sin args)
     if (strcmp(s, "auto") == 0)   return MODE_AUTO;
     if (strcmp(s, "manual") == 0) return MODE_MANUAL;
     return -1;
 }
 
 /**
- * @brief Parsea la clave de encriptación hexadecimal
+ * @brief Parsea la clave de encriptación hexadecimal (2 chars)
  * 
  * Convierte una cadena hexadecimal de 2 caracteres en un byte
  * que se usará como clave de encriptación/desencriptación XOR.
@@ -140,6 +133,23 @@ static void pretty_time(time_t t, char* buf, size_t n) {
         return;
     }
     strftime(buf, n, "%H:%M:%S", tm);
+}
+
+/**
+ * @brief Parsea un entero no negativo (delay en ms)
+ * 
+ * @param s Cadena numérica
+ * @param out Salida del valor
+ * @return 1 si es válido, 0 si no
+ */
+static int parse_nonneg_int(const char* s, int* out) {
+    if (!s || !*s) return 0;
+    char* end = NULL;
+    long v = strtol(s, &end, 10);
+    if (*end != '\0') return 0;
+    if (v < 0 || v > MAX_DELAY_MS) return 0;
+    if (out) *out = (int)v;
+    return 1;
 }
 
 // =============================================================================
@@ -215,6 +225,24 @@ static void print_reception_box(SharedMemory* shm,
 }
 
 // =============================================================================
+// AYUDA/USO
+// =============================================================================
+
+static void print_usage(const char* argv0) {
+    fprintf(stderr, "Uso:\n");
+    fprintf(stderr, "  %s                      # auto, clave SHM, delay=0\n", argv0);
+    fprintf(stderr, "  %s auto                # auto, clave SHM, delay=0\n", argv0);
+    fprintf(stderr, "  %s manual              # manual, clave SHM\n", argv0);
+    fprintf(stderr, "  %s auto <KEY>          # auto, clave=<KEY>, delay=0 (KEY=2 hex)\n", argv0);
+    fprintf(stderr, "  %s manual <KEY>        # manual, clave=<KEY>\n", argv0);
+    fprintf(stderr, "  %s auto <KEY> <MS>     # auto, clave=<KEY>, delay=<MS>\n", argv0);
+    fprintf(stderr, "  %s auto <MS>           # auto, clave SHM, delay=<MS>\n", argv0);
+    fprintf(stderr, "Notas:\n");
+    fprintf(stderr, "  - <KEY> es 2 hex (ej: AA, ff)\n");
+    fprintf(stderr, "  - <MS> es delay en milisegundos (0..%d)\n", MAX_DELAY_MS);
+}
+
+// =============================================================================
 // FUNCIÓN PRINCIPAL
 // =============================================================================
 
@@ -222,32 +250,96 @@ int main(int argc, char* argv[]) {
     print_banner();
     
     // =========================================================================
-    // PARSEO DE ARGUMENTOS
+    // PARSEO DE ARGUMENTOS (lógica alineada con Emisor)
     // =========================================================================
-    
-    if (argc < 2 || argc > 4) {
-        fprintf(stderr, RED "[ERROR] Uso: %s <auto|manual> [clave_hex] [delay_ms]\n" RESET, argv[0]);
-        fprintf(stderr, "Ejemplos:\n");
-        fprintf(stderr, "  %s auto          # Usa clave de SHM, delay 100ms\n", argv[0]);
-        fprintf(stderr, "  %s auto AA       # Usa clave AA, delay 100ms\n", argv[0]);
-        fprintf(stderr, "  %s auto AA 10    # Usa clave AA, delay 10ms\n", argv[0]);
-        fprintf(stderr, "  %s manual        # Modo manual\n", argv[0]);
+    if (argc < 1 || argc > 4) {
+        fprintf(stderr, RED "[ERROR] Número de argumentos inválido\n" RESET);
+        print_usage(argv[0]);
         return EXIT_FAILURE;
     }
-    
-    int mode = parse_mode(argv[1]);
-    if (mode == -1) {
-        fprintf(stderr, RED "[ERROR] Modo inválido. Use 'auto' o 'manual'\n" RESET);
-        return EXIT_FAILURE;
-    }
-    
+
+    int mode = MODE_AUTO;                 // por defecto
     int has_custom_key = 0;
-    unsigned char key = parse_key_opt((argc >= 3) ? argv[2] : NULL, &has_custom_key);
-    
-    int delay_ms = DEFAULT_DELAY_MS;
-    if (argc >= 4 && mode == MODE_AUTO) {
-        int d = atoi(argv[3]);
-        if (d >= MIN_DELAY_MS && d <= MAX_DELAY_MS) delay_ms = d;
+    unsigned char key = 0;
+    int delay_ms = DEFAULT_DELAY_MS;      // por defecto: 0 (sin slowdown)
+
+    if (argc == 1) {
+        // ./receptor
+        mode = MODE_AUTO;
+        has_custom_key = 0;
+        delay_ms = 0;
+    } else {
+        // al menos un argumento
+        mode = parse_mode(argv[1]);
+        if (mode == -1) {
+            fprintf(stderr, RED "[ERROR] Modo inválido. Use 'auto' o 'manual'\n" RESET);
+            print_usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+
+        if (argc == 2) {
+            // ./receptor auto | ./receptor manual
+            has_custom_key = 0;
+            delay_ms = 0; // manual ignora delay; auto sin slowdown
+        } else if (argc == 3) {
+            // ./receptor auto X -> X puede ser KEY (2 hex) o MS (delay)
+            // ./receptor manual KEY
+            if (mode == MODE_AUTO) {
+                int d = 0;
+                int dummy_has_key = 0;
+                unsigned char k = parse_key_opt(argv[2], &dummy_has_key);
+                if (dummy_has_key) {
+                    key = k;
+                    has_custom_key = 1;
+                    delay_ms = 0; // auto con KEY pero sin MS -> sin slowdown
+                } else {
+                    if (!parse_nonneg_int(argv[2], &d)) {
+                        fprintf(stderr, RED "[ERROR] Argumento inválido '%s'. Espere <KEY(hex2)> o <MS>\n" RESET, argv[2]);
+                        print_usage(argv[0]);
+                        return EXIT_FAILURE;
+                    }
+                    has_custom_key = 0; // clave desde SHM
+                    delay_ms = d;       // auto con delay explícito
+                }
+            } else { // MODE_MANUAL
+                int ok = 0;
+                unsigned char k = parse_key_opt(argv[2], &ok);
+                if (!ok) {
+                    fprintf(stderr, RED "[ERROR] Clave inválida para modo manual. Use 2 hex (ej: AA)\n" RESET);
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                key = k;
+                has_custom_key = 1;
+                delay_ms = 0; // manual ignora slowdown
+            }
+        } else { // argc == 4
+            // ./receptor auto KEY MS
+            // ./receptor manual KEY (y un MS extra que ignoramos)
+            if (mode == MODE_AUTO) {
+                int ok_key = 0, d = 0;
+                unsigned char k = parse_key_opt(argv[2], &ok_key);
+                if (!ok_key || !parse_nonneg_int(argv[3], &d)) {
+                    fprintf(stderr, RED "[ERROR] Use: auto <KEY(hex2)> <MS>\n" RESET);
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                key = k;
+                has_custom_key = 1;
+                delay_ms = d;
+            } else { // MODE_MANUAL
+                int ok_key = 0;
+                unsigned char k = parse_key_opt(argv[2], &ok_key);
+                if (!ok_key) {
+                    fprintf(stderr, RED "[ERROR] Clave inválida para modo manual. Use 2 hex (ej: AA)\n" RESET);
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                key = k;
+                has_custom_key = 1;
+                delay_ms = 0; // manual ignora slowdown (argv[3] se ignora)
+            }
+        }
     }
     
     // =========================================================================
@@ -371,9 +463,6 @@ int main(int argc, char* argv[]) {
         
         // =====================================================================
         // VERIFICACIÓN DE FINALIZACIÓN #1 (antes de bloquear)
-        // Esta verificación previene que el proceso quede bloqueado esperando
-        // datos que nunca llegarán cuando ya se procesó todo el archivo.
-        // NO es busy waiting porque se ejecuta solo UNA VEZ por iteración.
         // =====================================================================
         
         int should_exit = 0;
@@ -402,8 +491,7 @@ int main(int argc, char* argv[]) {
         }
         
         // =====================================================================
-        // PASO 1: Esperar a que haya un item disponible
-        // sem_wait() BLOQUEA sin busy waiting hasta que un emisor publique
+        // PASO 1: Esperar a que haya un item disponible (bloqueante, sin busy wait)
         // =====================================================================
         
         if (sem_wait(g_sem_decrypt_items) != 0) {
@@ -452,7 +540,6 @@ int main(int argc, char* argv[]) {
         
         // =====================================================================
         // PASO 5: Escribir el byte desencriptado al archivo de salida
-        // pwrite() permite escritura posicional segura entre múltiples receptores
         // =====================================================================
         
         if (write_decoded_char(out_fd, info.text_index, (unsigned char)plain) != 0) {
@@ -486,11 +573,14 @@ int main(int argc, char* argv[]) {
         print_reception_box(shm, info.slot_index, info.text_index, enc, plain,
                             slot.timestamp, slot.emisor_pid);
         chars_recv++;
+
+        // --- NUEVO: aplicar slowdown sólo en modo AUTO y sólo si delay_ms > 0 ---
+        if (mode == MODE_AUTO && delay_ms > 0) {
+            usleep((useconds_t)delay_ms * 1000);
+        }
         
         // =====================================================================
         // VERIFICACIÓN DE FINALIZACIÓN #2 (después de procesar)
-        // Segunda oportunidad de salida limpia si acabamos de procesar el
-        // último carácter del archivo.
         // =====================================================================
         
         sem_wait(g_sem_global);
