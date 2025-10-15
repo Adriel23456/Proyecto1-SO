@@ -22,15 +22,6 @@ volatile sig_atomic_t shutdown_requested = 0;
 static struct termios old_tio, new_tio;
 
 /**
- * @brief Configura el mecanismo de trigger basado en archivo
- * 
- * Esta función crea y configura un archivo que actúa como trigger.
- * El archivo se usa como un interruptor: cuando su contenido es '1',
- * se activa la finalización del sistema. Simula un botón físico.
- * 
- * @return 0 si la configuración fue exitosa, -1 en caso de error
- */
-/**
  * @brief Configura la entrada del teclado en modo raw
  * 
  * Configura el terminal para leer teclas individuales sin necesidad
@@ -65,15 +56,6 @@ int setup_keyboard_input(void) {
 }
 
 /**
- * @brief Verifica el estado actual del trigger
- * 
- * Lee el contenido del archivo trigger para determinar si se ha
- * solicitado la finalización del sistema. El archivo contiene
- * un '1' cuando se activa el trigger.
- * 
- * @return 1 si el trigger está activado, 0 en caso contrario
- */
-/**
  * @brief Verifica si se presionó la tecla de finalización
  * 
  * Lee una tecla del teclado y verifica si es 'q' o 'Q'.
@@ -90,13 +72,6 @@ int check_keyboard_input(void) {
     return 0;
 }
 
-/**
- * @brief Limpia los recursos del trigger
- * 
- * Cierra y elimina el archivo usado como trigger.
- * Esta función debe llamarse durante la limpieza del programa
- * para no dejar recursos sin liberar.
- */
 /**
  * @brief Restaura la configuración original del terminal
  * 
@@ -124,15 +99,6 @@ void cleanup_keyboard(void) {
  * 
  * @param signo Número de la señal recibida
  */
-/**
- * @brief Maneja la limpieza y salida del programa
- * 
- * Esta función se ejecuta cuando se recibe una señal de terminación
- * (como Ctrl+C). Realiza una limpieza ordenada liberando todos
- * los recursos antes de terminar el programa.
- * 
- * @param signo Número de la señal recibida
- */
 void cleanup_and_exit(int signo) {
     cleanup_keyboard();
     if (shm) {
@@ -141,14 +107,6 @@ void cleanup_and_exit(int signo) {
     exit(0);
 }
 
-/**
- * @brief Configura los manejadores de señales del sistema
- * 
- * Inicializa la conexión a la memoria compartida y configura
- * el manejador para la señal SIGINT (Ctrl+C). Esto asegura
- * una terminación limpia incluso si el usuario interrumpe
- * el programa manualmente.
- */
 /**
  * @brief Configura los manejadores de señales del sistema
  * 
