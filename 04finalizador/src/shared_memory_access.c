@@ -1,133 +1,126 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/shm.h>
-#include <string.h>
 #include <time.h>
 #include "shared_memory_access.h"
-
-/* Define la clave para la memoria compartida, debe ser la misma que usa el inicializador */
-#define IPC_KEY 0x1234
+#include "constants.h"   // SHM_BASE_KEY y colores
 
 /**
  * Funciones para manejo de memoria compartida y estadísticas del sistema
- * Este archivo contiene las funciones necesarias para acceder a la memoria compartida
- * y mostrar las estadísticas de ejecución del sistema.
  */
 
-/**
- * @brief Conecta el proceso a la memoria compartida existente
- * 
- * Esta función obtiene acceso a la memoria compartida creada por el inicializador.
- * Utiliza la clave IPC_KEY para identificar el segmento de memoria correcto.
- * 
- * @return SharedMemory* Puntero a la estructura de memoria compartida
- * @exit Termina el programa si hay error al acceder a la memoria
- */
-SharedMemory* attach_shared_memory() {
-    int shm_id = shmget(IPC_KEY, sizeof(SharedMemory), 0666);
+SharedMemory* attach_shared_memory(void) {
+    int shm_id = shmget(SHM_BASE_KEY, sizeof(SharedMemory), 0666);
     if (shm_id == -1) {
         perror("shmget failed");
-        exit(1);
+        return NULL;
     }
-
     SharedMemory* shm = (SharedMemory*)shmat(shm_id, NULL, 0);
     if (shm == (void*)-1) {
         perror("shmat failed");
-        exit(1);
+        return NULL;
     }
-
     return shm;
 }
 
-/**
- * @brief Desconecta el proceso de la memoria compartida
- * 
- * Esta función libera la conexión del proceso con el segmento de memoria compartida.
- * Debe llamarse antes de finalizar el programa para liberar recursos.
- * 
- * @param shm Puntero a la estructura de memoria compartida a desconectar
- * @exit Termina el programa si hay error al desconectar
- */
 void detach_shared_memory(SharedMemory* shm) {
+    if (!shm) return;
     if (shmdt(shm) == -1) {
         perror("shmdt failed");
-        exit(1);
     }
 }
 
-/**
- * @brief Muestra las estadísticas finales del sistema
- * 
- * Esta función presenta un resumen completo de la ejecución del sistema, incluyendo:
- * - Estadísticas generales (total de caracteres, progreso)
- * - Estadísticas de cada emisor (PID, caracteres procesados, tiempos)
- * - Estadísticas de cada receptor (PID, caracteres procesados, tiempos)
- * 
- * La información se muestra con formato y colores para mejor legibilidad
- * 
- * @param shm Puntero a la estructura de memoria compartida con las estadísticas
- */
+static void fmt_time(char* out, size_t n, time_t t) {
+    if (!out || n == 0) return;
+    struct tm tmp;
+    localtime_r(&t, &tmp);
+    strftime(out, n, "%H:%M:%S", &tmp);
+}
+
 void print_statistics(SharedMemory* shm) {
+    if (!shm) return;
+
+    /* Snapshots para consistencia visual */
+    const int total_file  = shm->total_chars_in_file;
+    const int total_proc  = shm->total_chars_processed;
+    const int act_e       = shm->active_emisores;
+    const int tot_e       = shm->total_emisores;
+    const int act_r       = shm->active_receptores;
+    const int tot_r       = shm->total_receptores;
+    const int buf_sz      = shm->buffer_size;
+
+    int emisores_n   = shm->emisor_stats_count;
+    int receptores_n = shm->receptor_stats_count;
+
+    /* Límites explícitos en líneas separadas para evitar -Wmisleading-indentation */
+    if (emisores_n < 0)  emisores_n = 0;
+    if (emisores_n > 100) emisores_n = 100;
+
+    if (receptores_n < 0)  receptores_n = 0;
+    if (receptores_n > 100) receptores_n = 100;
+
     printf("\033[1;36m╔════════════════════════════════════════════════════════════╗\033[0m\n");
     printf("\033[1;36m║                ESTADÍSTICAS DEL SISTEMA                    ║\033[0m\n");
     printf("\033[1;36m╚════════════════════════════════════════════════════════════╝\033[0m\n\n");
 
-    // Estadísticas generales
+    /* Generales */
     printf("\033[1;33mEstadísticas Generales:\033[0m\n");
-    printf("  Total de caracteres en archivo:  %d\n", shm->total_chars_in_file);
-    printf("  Total de caracteres procesados:  %d\n", shm->total_chars_processed);
-    printf("  Caracteres en memoria compartida: %d\n", 
+    printf("  Total de caracteres en archivo:  %d\n", total_file);
+    printf("  Total de caracteres procesados:  %d\n", total_proc);
+    printf("  Caracteres en memoria compartida: %d\n",
            shm->decrypt_queue.size + shm->encrypt_queue.size);
-    printf("  Porcentaje completado: %.2f%%\n", 
-           (float)shm->total_chars_processed / shm->total_chars_in_file * 100);
-    
-    // Estado de procesos
-    printf("\n\033[1;34mEstado de Procesos:\033[0m\n");
-    printf("  Emisores activos:  %d / %d (total histórico)\n", 
-           shm->active_emisores, shm->total_emisores);
-    printf("  Receptores activos: %d / %d (total histórico)\n", 
-           shm->active_receptores, shm->total_receptores);
-    
-    // Uso de memoria
-    size_t buffer_size = shm->buffer_size * sizeof(CharacterSlot);
-    size_t queue_size = 2 * shm->buffer_size * sizeof(SlotRef); // colas de encrypt y decrypt
-    size_t stats_size = (sizeof(ProcessStats) * 200); // espacio para estadísticas
-    size_t total_size = sizeof(SharedMemory) + buffer_size + queue_size + stats_size;
-    
-    printf("\n\033[1;36mUso de Memoria:\033[0m\n");
-    printf("  Buffer de caracteres: %zu bytes\n", buffer_size);
-    printf("  Colas de slots:      %zu bytes\n", queue_size);
-    printf("  Estadísticas:        %zu bytes\n", stats_size);
-    printf("  Total utilizado:     %zu bytes (%.2f MB)\n", 
-           total_size, (float)total_size / (1024*1024));
+    if (total_file > 0) {
+        printf("  Porcentaje completado: %.2f%%\n",
+               (float)total_proc / (float)total_file * 100.0f);
+    } else {
+        printf("  Porcentaje completado: N/A\n");
+    }
+    fflush(stdout);
 
-    // Estadísticas de Emisores
+    /* Estado de procesos */
+    printf("\n\033[1;34mEstado de Procesos:\033[0m\n");
+    printf("  Emisores activos:  %d / %d (total histórico)\n", act_e, tot_e);
+    printf("  Receptores activos: %d / %d (total histórico)\n", act_r, tot_r);
+    fflush(stdout);
+
+    /* Uso (estimado) */
+    size_t buffer_bytes = (size_t)buf_sz * sizeof(CharacterSlot);
+    size_t queue_bytes  = 2ULL * (size_t)buf_sz * sizeof(SlotRef);
+    size_t stats_bytes  = (sizeof(ProcessStats) * 200);
+    size_t total_bytes  = sizeof(SharedMemory) + buffer_bytes + queue_bytes + stats_bytes;
+
+    printf("\n\033[1;36mUso de Memoria:\033[0m\n");
+    printf("  Buffer de caracteres: %zu bytes\n", buffer_bytes);
+    printf("  Colas de slots:      %zu bytes\n", queue_bytes);
+    printf("  Estadísticas:        %zu bytes\n", stats_bytes);
+    printf("  Total utilizado:     %zu bytes (%.2f MB)\n",
+           total_bytes, (float)total_bytes / (1024.0f * 1024.0f));
+    fflush(stdout);
+
+    /* Emisores */
     printf("\033[1;32mEstadísticas de Emisores:\033[0m\n");
     printf("  %-10s %-15s %-20s %-20s\n", "PID", "Chars Proc.", "Tiempo Inicio", "Tiempo Fin");
     printf("  %-10s %-15s %-20s %-20s\n", "----------", "---------------", "--------------------", "--------------------");
-    
-    for (int i = 0; i < shm->emisor_stats_count; i++) {
-        ProcessStats stat = shm->emisor_stats[i];
-        char start_time[20], end_time[20];
-        strftime(start_time, sizeof(start_time), "%H:%M:%S", localtime(&stat.start_time));
-        strftime(end_time, sizeof(end_time), "%H:%M:%S", localtime(&stat.end_time));
-        printf("  %-10d %-15d %-20s %-20s\n", 
-               stat.pid, stat.chars_processed, start_time, end_time);
+    for (int i = 0; i < emisores_n; i++) {
+        ProcessStats st = shm->emisor_stats[i];
+        char a[20]={0}, b[20]={0};
+        fmt_time(a, sizeof(a), st.start_time);
+        fmt_time(b, sizeof(b), st.end_time);
+        printf("  %-10d %-15d %-20s %-20s\n", st.pid, st.chars_processed, a, b);
     }
     printf("\n");
+    fflush(stdout);
 
-    // Estadísticas de Receptores
+    /* Receptores (encabezado SIEMPRE) */
     printf("\033[1;35mEstadísticas de Receptores:\033[0m\n");
     printf("  %-10s %-15s %-20s %-20s\n", "PID", "Chars Proc.", "Tiempo Inicio", "Tiempo Fin");
     printf("  %-10s %-15s %-20s %-20s\n", "----------", "---------------", "--------------------", "--------------------");
-    
-    for (int i = 0; i < shm->receptor_stats_count; i++) {
-        ProcessStats stat = shm->receptor_stats[i];
-        char start_time[20], end_time[20];
-        strftime(start_time, sizeof(start_time), "%H:%M:%S", localtime(&stat.start_time));
-        strftime(end_time, sizeof(end_time), "%H:%M:%S", localtime(&stat.end_time));
-        printf("  %-10d %-15d %-20s %-20s\n", 
-               stat.pid, stat.chars_processed, start_time, end_time);
+    for (int i = 0; i < receptores_n; i++) {
+        ProcessStats st = shm->receptor_stats[i];
+        char a[20]={0}, b[20]={0};
+        fmt_time(a, sizeof(a), st.start_time);
+        fmt_time(b, sizeof(b), st.end_time);
+        printf("  %-10d %-15d %-20s %-20s\n", st.pid, st.chars_processed, a, b);
     }
     printf("\n");
+    fflush(stdout);
 }

@@ -180,9 +180,10 @@ int main(int argc, char* argv[]) {
         if (mode == MODE_MANUAL) {
             printf(CYAN "\nPresione ENTER..." RESET);
             char buffer[10];
-            if (fgets(buffer, sizeof(buffer), stdin) == NULL) break;
-        } else {
-            usleep(delay_ms * 1000);
+            errno = 0;
+            if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+                if (errno == EINTR || should_terminate || shm->shutdown_flag) break;
+            }
         }
     }
     

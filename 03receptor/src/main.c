@@ -83,19 +83,6 @@ static void on_signal(int sig) {
 // =============================================================================
 
 /**
- * @brief Suspende la ejecución por un número de milisegundos
- * 
- * Utilizada en modo automático para controlar la velocidad de
- * procesamiento de caracteres.
- * 
- * @param ms Milisegundos a esperar (debe ser positivo)
- */
-static void sleep_ms(int ms) {
-    if (ms <= 0) return;
-    usleep((useconds_t)ms * 1000);
-}
-
-/**
  * @brief Parsea el modo de ejecución del receptor
  * 
  * Convierte una cadena en el modo de ejecución correspondiente.
@@ -528,9 +515,10 @@ int main(int argc, char* argv[]) {
         if (mode == MODE_MANUAL) {
             printf(CYAN "\nPresione ENTER para continuar (o Ctrl+C para salir)..." RESET);
             char tmp[8];
-            if (!fgets(tmp, sizeof tmp, stdin)) break;
-        } else {
-            sleep_ms(delay_ms);
+            errno = 0;
+            if (!fgets(tmp, sizeof tmp, stdin)) {
+                if (errno == EINTR || should_terminate) break;
+            }
         }
     }
     
