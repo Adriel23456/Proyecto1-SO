@@ -40,17 +40,16 @@ int main() {
     printf("\033[1;36m╚════════════════════════════════════════════════════════════╝\033[0m\n\n");
 
     setup_signal_handlers();
-    if (setup_input_trigger() < 0) {
-        fprintf(stderr, "Error configurando trigger\n");
+    if (setup_keyboard_input() < 0) {
+        fprintf(stderr, "Error configurando entrada de teclado\n");
         return 1;
     }
     
     SharedMemory* shm = attach_shared_memory();
 
-    printf("\033[1;33m→ Esperando activación del trigger...\033[0m\n");
-    // Esperar activación del trigger
-    while (!check_trigger_state()) {
-        sleep(1);
+    printf("\033[1;33m→ Esperando que presione 'q' para finalizar...\033[0m\n");
+    while (!check_keyboard_input()) {
+        usleep(100000);  // 100ms de espera para no consumir mucha CPU
     }
 
     // Activar flag de finalización
@@ -70,8 +69,18 @@ int main() {
     print_statistics(shm);
 
     // Limpiar y salir
+    printf("\n\033[1;33m→ Limpiando recursos...\033[0m\n");
+    
+    // Restaurar terminal primero
+    cleanup_keyboard();
+    
+    // Luego desconectar memoria compartida
     detach_shared_memory(shm);
-    printf("\n\033[1;32m✓ Finalización completada\033[0m\n");
+    
+    printf("\033[1;32m✓ Finalización completada\033[0m\n");
+    
+    // Asegurar que la salida esté limpia
+    fflush(stdout);
     
     return 0;
 }
