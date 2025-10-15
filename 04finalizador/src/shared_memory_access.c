@@ -74,10 +74,32 @@ void print_statistics(SharedMemory* shm) {
 
     // Estadísticas generales
     printf("\033[1;33mEstadísticas Generales:\033[0m\n");
-    printf("  Total de caracteres en archivo: %d\n", shm->total_chars_in_file);
-    printf("  Total de caracteres procesados: %d\n", shm->total_chars_processed);
-    printf("  Porcentaje completado: %.2f%%\n\n", 
+    printf("  Total de caracteres en archivo:  %d\n", shm->total_chars_in_file);
+    printf("  Total de caracteres procesados:  %d\n", shm->total_chars_processed);
+    printf("  Caracteres en memoria compartida: %d\n", 
+           shm->decrypt_queue.size + shm->encrypt_queue.size);
+    printf("  Porcentaje completado: %.2f%%\n", 
            (float)shm->total_chars_processed / shm->total_chars_in_file * 100);
+    
+    // Estado de procesos
+    printf("\n\033[1;34mEstado de Procesos:\033[0m\n");
+    printf("  Emisores activos:  %d / %d (total histórico)\n", 
+           shm->active_emisores, shm->total_emisores);
+    printf("  Receptores activos: %d / %d (total histórico)\n", 
+           shm->active_receptores, shm->total_receptores);
+    
+    // Uso de memoria
+    size_t buffer_size = shm->buffer_size * sizeof(CharacterSlot);
+    size_t queue_size = 2 * shm->buffer_size * sizeof(SlotRef); // colas de encrypt y decrypt
+    size_t stats_size = (sizeof(ProcessStats) * 200); // espacio para estadísticas
+    size_t total_size = sizeof(SharedMemory) + buffer_size + queue_size + stats_size;
+    
+    printf("\n\033[1;36mUso de Memoria:\033[0m\n");
+    printf("  Buffer de caracteres: %zu bytes\n", buffer_size);
+    printf("  Colas de slots:      %zu bytes\n", queue_size);
+    printf("  Estadísticas:        %zu bytes\n", stats_size);
+    printf("  Total utilizado:     %zu bytes (%.2f MB)\n", 
+           total_size, (float)total_size / (1024*1024));
 
     // Estadísticas de Emisores
     printf("\033[1;32mEstadísticas de Emisores:\033[0m\n");
